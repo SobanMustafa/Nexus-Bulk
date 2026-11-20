@@ -1,0 +1,24 @@
+# Secrets + local state — kabhi GitHub pe NAHI (README dekho)
+pages.json
+tokens/
+auth/
+client_secrets.json
+token.json
+uploads.csv
+urls.txt
+downloads/
+state/
+download_archive.txt
+.archive_*.txt
+*.info.json
+downloads/*.jpg
+downloads/*.webp
+downloads/*.png
+failed.txt
+failed_uploads.csv
+uploaded.csv
+__pycache__/
+.venv/
+venv/
+videos/
+*.pyc
