@@ -12,32 +12,40 @@ akela bhi chalta hai, aur pipeline/multi in ko jodte hain.
 ## GUI App (buttons wali window)
 
 Terminal ki bajaye buttons se chalana ho to **`run.bat` pe
-double-click** karo — ya terminal se `python app.py`. Aik window
-khul jati hai, andar se ye wahi terminal commands chalata hai,
-output neeche log mein live nazar aata hai:
+double-click** karo — ya terminal se `python app.py`. Nayi GUI
+**dark modern theme** mein hai: teen alag section cards
+(**Download**, **YouTube Upload**, **Multi Upload**) — har
+section ka apna rang aur baray saaf buttons. Upar **status**
+nazar aata hai (● Ready / ● Chal raha hai / ● Ho gaya / ● Error)
+aur neeche **progress bar** download ka percent live dikhati
+hai. Andar se ye wahi terminal commands chalata hai, output
+neeche **Live Log** mein live nazar aata hai:
 
 | Button | Peeche wala command |
 |---|---|
-| 1. Sirf Check (Pipeline) | `python pipeline.py --check` |
-| 2. Download Only | `python pipeline.py --download-only --quality <quality>` |
-| 3. Pipeline — Pehli 1 Video (Test) | `python pipeline.py --limit 1 --privacy <privacy> --quality <quality>` |
-| 4. Pipeline Chalao (Download + Upload) | `python pipeline.py --privacy <privacy> --quality <quality>` |
-| 5. Multi Upload — Check | `python multi_upload.py --check` |
-| 6. Multi Upload Chalao (FB + YT) | `python multi_upload.py` |
+| Download Only (Download card) | `python pipeline.py --download-only --quality <quality>` |
+| Sirf Check (Download card) | `python pipeline.py --check` |
+| Pipeline Test — Pehli 1 Video (YouTube card) | `python pipeline.py --limit 1 --privacy <privacy> --quality <quality>` |
+| Pipeline — Download + Upload (YouTube card) | `python pipeline.py --privacy <privacy> --quality <quality>` |
+| Multi Check (Multi card) | `python multi_upload.py --check` |
+| Multi Upload (Multi card) | `python multi_upload.py` |
 
-- **Limit** (optional): kitni videos — khaali = saari. Button 2
-  aur 4 pe lagta hai (button 3 pe hamesha 1 fix hai).
-- **Target** (optional): sirf aik destination, e.g.
-  `mind-maze-yt` / `mind-maze-fb` / `horror-fb` — Multi wale
-  buttons (5, 6) pe lagta hai; khaali = saare targets.
-- **Privacy**: private / unlisted / public (default **private**) —
-  sirf Pipeline wale buttons pe; Multi mein privacy queue ki
-  har row se aati hai.
-- **Quality**: 2160 = **4K** (default), 1440 = **2K**, 1080, 720 —
-  sirf download wale buttons (2, 3, 4) pe lagti hai. Bari quality
-  = bari file, slow download.
+- **Limit** (optional, Download card): kitni videos — khaali =
+  saari. Download Only aur Pipeline pe lagta hai (Pipeline Test
+  pe hamesha 1 fix hai).
+- **Target** (Multi card): sirf aik destination — preset
+  `mind-maze-yt` / `mind-maze-fb` / `horror-fb` chuno ya khud
+  likho; khaali = saare targets.
+- **Privacy** (YouTube card): private / unlisted / public
+  (default **private**) — sirf Pipeline wale buttons pe; Multi
+  mein privacy queue ki har row se aati hai.
+- **Quality** (Download card): 2160 = **4K** (default), 1440 =
+  **2K**, 1080, 720 — sirf download wale actions pe lagti hai.
+  Bari quality = bari file, slow download.
 - **Stop** button chalti hui command ko band kar deta hai, aur
-  command khatam honay pe log mein `KHATAM — exit code X` ata hai.
+  command khatam honay pe log mein `KHATAM — exit code X` ata
+  hai. **Project Folder Kholo** button project ka folder khol
+  deta hai.
 - tkinter Python ke sath **free** aata hai (python.org installer) —
   kuch alag install nahi karna. Agar window na khule to app saaf
   message de gi, aur terminal commands waise hi chalte rahenge.

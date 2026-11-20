@@ -1,7 +1,8 @@
 """Logic tests for app.py (GUI) — no display, no window, no network.
 Run:  python3 tests/test_app.py
 
-Sirf build_command wali pure logic test hoti hai. `import app` headless
+Sirf build_command / parse_progress wali pure logic test hoti hai.
+`import app` headless
 chalna chahiye kyunke app.py tkinter ko module level pe import NAHI karta
 (lazy import sirf main() ke andar hai).
 """
@@ -93,5 +94,18 @@ expect_value_error(lambda: app.build_command("pipeline", quality="4K"), "quality
 # khaali quality -> default 2160 (privacy wali house style: khaali = default)
 assert app.build_command("pipeline", quality="")[-2:] == ["--quality", "2160"]
 print("PASS: (g) quality pass-through (3 download actions), check/multi exclude, invalid -> ValueError")
+
+# (h) parse_progress — yt-dlp progress lines se percent, warna None
+assert app.parse_progress(
+    "[download]  45.3% of  120.00MiB at  2.00MiB/s ETA 00:30") == 45.3
+assert app.parse_progress("[download]   0.0% of  10.00MiB at  1.00MiB/s") == 0.0
+assert app.parse_progress("[download] 100% of  120.00MiB in 00:01:00") == 100.0
+assert app.parse_progress("[download] 100.0% of  120.00MiB") == 100.0
+assert app.parse_progress("[download] Destination: video.mp4") is None
+assert app.parse_progress("CHECK OK: 1 video(s) ready") is None
+assert app.parse_progress("kuch bhi garbage line hai") is None
+assert app.parse_progress("") is None
+assert app.parse_progress(None) is None
+print("PASS: (h) parse_progress yt-dlp lines / 100% / no-percent -> None")
 
 print("ALL LOGIC TESTS PASS")

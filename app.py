@@ -3,8 +3,14 @@
 Bulk Tool — GUI App (buttons wali window, personal use only)
 =============================================================
 Terminal wale tool (pipeline.py / multi_upload.py) ke upar aik
-saadi si window: double-click `run.bat` ya `python app.py` chalao,
-button dabao, neeche log mein sab output live nazar aata hai.
+modern, friendly window: double-click `run.bat` ya `python app.py`
+chalao, section mein button dabao, neeche Live Log mein sab output
+live nazar aata hai, aur progress bar download ka percent dikhati
+hai.
+
+Look: dark theme, teen alag sections (Download / YouTube Upload /
+Multi Upload) — har section ka apna rang aur baray saaf buttons,
+upar status (Ready / Chal raha hai / Ho gaya / Error).
 
 Andar se ye wahi purane commands chalata hai — koi naya engine
 nahi hai. Terminal commands pehle ki tarah chalte rahenge; ye sirf
@@ -20,27 +26,60 @@ Chalana (Windows laptop):
     run.bat pe double-click          (sab se aasan)
     python app.py                     (ya terminal se)
 
-Buttons aur un ke terminal commands:
-    1. Sirf Check (Pipeline)   -> python pipeline.py --check
-    2. Download Only           -> python pipeline.py --download-only [--limit N] --quality <quality>
-    3. Pipeline Test (1 video) -> python pipeline.py --limit 1 --privacy <privacy> --quality <quality>
-    4. Pipeline Chalao         -> python pipeline.py --privacy <privacy> [--limit N] --quality <quality>
-    5. Multi Upload Check      -> python multi_upload.py --check [--target T]
-    6. Multi Upload Chalao     -> python multi_upload.py [--target T] [--limit N]
+Sections / buttons aur un ke terminal commands:
+    DOWNLOAD card:
+      Download Only            -> python pipeline.py --download-only [--limit N] --quality <quality>
+      Sirf Check               -> python pipeline.py --check
+    UPLOAD — YOUTUBE card:
+      Pipeline Test (1 video)  -> python pipeline.py --limit 1 --privacy <privacy> --quality <quality>
+      Pipeline (Download+Upload) -> python pipeline.py --privacy <privacy> [--limit N] --quality <quality>
+    MULTI UPLOAD card (Facebook + YouTube):
+      Multi Check              -> python multi_upload.py --check [--target T]
+      Multi Upload             -> python multi_upload.py [--target T] [--limit N]
        (multi mein privacy queue ki rows se aati hai, is liye
         wahan --privacy pass nahi hota; quality download ke waqt
         decide hoti hai, upload pe nahi, is liye multi ko --quality
         bhi pass nahi hota)
 
 Quality dropdown: 2160 = 4K (default), 1440 = 2K, 1080, 720 —
-sirf download wale buttons (2, 3, 4) pe lagti hai.
+sirf download wale actions pe lagti hai.
 """
 import os
+import re
 import sys
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PRIVACY_CHOICES = ("private", "unlisted", "public")
 QUALITY_CHOICES = ("720", "1080", "1440", "2160")  # 1440 = 2K, 2160 = 4K
+TARGET_PRESETS = ("mind-maze-yt", "mind-maze-fb", "horror-fb")
+
+# --- Modern dark theme (sirf GUI in ko use karti hai) ---
+COL_BG = "#16181d"          # window background
+COL_CARD = "#1f222b"        # section cards
+COL_BORDER = "#2c303c"      # card / field borders
+COL_TEXT = "#e8eaf0"        # primary text
+COL_MUTED = "#9aa3b2"       # secondary / hint text
+COL_ACCENT = "#4f7cff"      # blue — YouTube pipeline / focus
+COL_ACCENT_ACTIVE = "#3d63d6"
+COL_GREEN = "#2ea86a"       # download
+COL_GREEN_ACTIVE = "#22794d"
+COL_PURPLE = "#7c5cff"      # multi upload
+COL_PURPLE_ACTIVE = "#6347d6"
+COL_RED = "#d9534f"         # stop / error
+COL_RED_ACTIVE = "#b93e3a"
+COL_BTN = "#2a2e39"         # secondary buttons
+COL_BTN_ACTIVE = "#363b49"
+COL_INPUT = "#262a35"       # entries / dropdowns
+COL_LOG_BG = "#101216"
+COL_LOG_FG = "#d6dae3"
+
+FONT_UI = ("Segoe UI", 10)
+FONT_TITLE = ("Segoe UI", 21, "bold")
+FONT_SECTION = ("Segoe UI", 12, "bold")
+FONT_BTN = ("Segoe UI", 11, "bold")
+FONT_SMALL = ("Segoe UI", 9)
+FONT_STATUS = ("Segoe UI", 11, "bold")
+FONT_LOG = ("Consolas", 10)
 
 # NOTE: tkinter yahan import NAHI hota — sirf main() ke andar,
 # taake `import app` baghair display ke bhi chal jaye (tests ke liye).
@@ -142,6 +181,31 @@ def build_command(action, limit="", target="", privacy="private", quality="2160"
     )
 
 
+_PROGRESS_RE = re.compile(r"(\d+(?:\.\d+)?)\s*%")
+
+
+def parse_progress(line):
+    """Aik output line se download percent nikalo — warna None.
+
+    yt-dlp ki progress lines aisi hoti hain:
+        [download]  45.3% of  120.00MiB at  2.00MiB/s ETA 00:30
+        [download] 100% of  120.00MiB in 00:01:00
+    Percent wali koi line na ho (ya khaali/garbage ho) to None.
+    Pure function — GUI isay har line pe chala ke progress bar
+    update karti hai.
+    """
+    if not line:
+        return None
+    m = _PROGRESS_RE.search(str(line))
+    if m is None:
+        return None
+    try:
+        pct = float(m.group(1))
+    except ValueError:
+        return None
+    return max(0.0, min(100.0, pct))
+
+
 TKINTER_MISSING_MSG = (
     "Bulk Tool GUI: Python ka tkinter nahi mila, is liye window nahi khul sakti.\n"
     "Koi baat nahi — tool terminal se bilkul waisa hi chalta hai:\n"
@@ -165,66 +229,240 @@ def _build_gui(tk, scrolledtext):
     import queue
     import subprocess
     import threading
+    from tkinter import ttk
 
     root = tk.Tk()
     root.title("Bulk Tool")
-    root.geometry("760x560")
+    root.geometry("900x680")
+    root.minsize(820, 620)
+    root.configure(bg=COL_BG)
 
-    state = {"proc": None, "running": False}
+    # ttk styles — clam theme pe progress bar / combobox ke rang lagte hain
+    style = ttk.Style(root)
+    try:
+        style.theme_use("clam")
+    except tk.TclError:
+        pass
+    style.configure(
+        "Modern.Horizontal.TProgressbar",
+        troughcolor=COL_CARD, background=COL_ACCENT,
+        bordercolor=COL_BG, lightcolor=COL_ACCENT, darkcolor=COL_ACCENT,
+        thickness=14,
+    )
+    style.configure(
+        "Dark.TCombobox",
+        fieldbackground=COL_INPUT, background=COL_BTN,
+        foreground=COL_TEXT, arrowcolor=COL_TEXT,
+        bordercolor=COL_BORDER, lightcolor=COL_BORDER, darkcolor=COL_BORDER,
+        padding=4,
+    )
+    root.option_add("*TCombobox*Listbox.background", COL_INPUT)
+    root.option_add("*TCombobox*Listbox.foreground", COL_TEXT)
+    root.option_add("*TCombobox*Listbox.selectBackground", COL_ACCENT)
+    root.option_add("*TCombobox*Listbox.selectForeground", "#ffffff")
+
+    state = {"proc": None, "running": False, "stopped": False}
     out_queue = queue.Queue()
+    buttons = []
 
-    # --- upar wale fields ---
-    fields = tk.Frame(root)
-    fields.pack(fill="x", padx=10, pady=(10, 0))
+    main = tk.Frame(root, bg=COL_BG)
+    main.pack(fill="both", expand=True, padx=14, pady=12)
 
-    tk.Label(fields, text="Limit (optional):").grid(row=0, column=0, sticky="w")
-    limit_var = tk.StringVar()
-    tk.Entry(fields, textvariable=limit_var, width=8).grid(
-        row=0, column=1, padx=(4, 16), sticky="w")
+    # ---------- chhote widget helpers ----------
+    def field_label(parent, text):
+        return tk.Label(parent, text=text, font=FONT_UI,
+                        bg=COL_CARD, fg=COL_MUTED)
 
-    tk.Label(fields, text="Target (optional):").grid(row=0, column=2, sticky="w")
-    target_var = tk.StringVar()
-    tk.Entry(fields, textvariable=target_var, width=18).grid(
-        row=0, column=3, padx=(4, 16), sticky="w")
+    def hint_label(parent, text):
+        return tk.Label(parent, text=text, font=FONT_SMALL,
+                        bg=COL_CARD, fg=COL_MUTED)
 
-    tk.Label(fields, text="Privacy:").grid(row=0, column=4, sticky="w")
-    privacy_var = tk.StringVar(value="private")
-    tk.OptionMenu(fields, privacy_var, *PRIVACY_CHOICES).grid(
-        row=0, column=5, padx=(4, 16), sticky="w")
+    def dark_entry(parent, var, width):
+        return tk.Entry(
+            parent, textvariable=var, width=width, bg=COL_INPUT,
+            fg=COL_TEXT, insertbackground=COL_TEXT, relief="flat",
+            font=FONT_UI, highlightthickness=1,
+            highlightbackground=COL_BORDER, highlightcolor=COL_ACCENT)
 
-    tk.Label(fields, text="Quality:").grid(row=0, column=6, sticky="w")
+    def dark_option_menu(parent, var, values, width=8):
+        om = tk.OptionMenu(parent, var, *values)
+        om.config(bg=COL_INPUT, fg=COL_TEXT,
+                  activebackground=COL_BTN_ACTIVE, activeforeground=COL_TEXT,
+                  relief="flat", bd=0, highlightthickness=1,
+                  highlightbackground=COL_BORDER, font=FONT_UI,
+                  cursor="hand2", width=width)
+        try:
+            om["menu"].config(bg=COL_INPUT, fg=COL_TEXT,
+                              activebackground=COL_ACCENT,
+                              activeforeground="#ffffff")
+        except tk.TclError:
+            pass
+        return om
+
+    def primary_btn(parent, text, color, active, command):
+        return tk.Button(
+            parent, text=text, command=command, bg=color, fg="#ffffff",
+            activebackground=active, activeforeground="#ffffff",
+            relief="flat", bd=0, font=FONT_BTN, padx=14, pady=12,
+            cursor="hand2", disabledforeground="#cfd4de")
+
+    def secondary_btn(parent, text, command):
+        return tk.Button(
+            parent, text=text, command=command, bg=COL_BTN, fg=COL_TEXT,
+            activebackground=COL_BTN_ACTIVE, activeforeground=COL_TEXT,
+            relief="flat", bd=0, font=FONT_BTN, padx=14, pady=10,
+            cursor="hand2", disabledforeground=COL_MUTED)
+
+    def make_card(title, accent):
+        card = tk.Frame(main, bg=COL_CARD, padx=14, pady=12,
+                        highlightthickness=1, highlightbackground=COL_BORDER)
+        card.pack(fill="x", pady=(0, 10))
+        head = tk.Frame(card, bg=COL_CARD)
+        head.pack(fill="x", pady=(0, 8))
+        tk.Frame(head, bg=accent, width=4).pack(side="left", fill="y")
+        tk.Label(head, text=title, font=FONT_SECTION,
+                 bg=COL_CARD, fg=COL_TEXT).pack(side="left", padx=(8, 0))
+        return card
+
+    # ---------- header ----------
+    header = tk.Frame(main, bg=COL_BG)
+    header.pack(fill="x", pady=(0, 10))
+    head_left = tk.Frame(header, bg=COL_BG)
+    head_left.pack(side="left")
+    tk.Label(head_left, text="Bulk Tool", font=FONT_TITLE,
+             bg=COL_BG, fg=COL_TEXT).pack(anchor="w")
+    tk.Label(head_left,
+             text="Bulk Downloader • YouTube Uploader • "
+                  "Multi-Page (Facebook + YouTube)",
+             font=FONT_SMALL, bg=COL_BG, fg=COL_MUTED).pack(anchor="w")
+    status_var = tk.StringVar(value="● Ready")
+    status_lbl = tk.Label(header, textvariable=status_var, font=FONT_STATUS,
+                          bg=COL_BG, fg=COL_MUTED)
+    status_lbl.pack(side="right", anchor="n", pady=8)
+
+    def set_status(text, color):
+        status_var.set(text)
+        status_lbl.config(fg=color)
+
+    # ---------- card 1: DOWNLOAD ----------
     quality_var = tk.StringVar(value="2160")
-    tk.OptionMenu(fields, quality_var, "2160", "1440", "1080", "720").grid(
-        row=0, column=7, padx=(4, 0), sticky="w")
+    limit_var = tk.StringVar()
+    card1 = make_card("DOWNLOAD", COL_GREEN)
+    row1 = tk.Frame(card1, bg=COL_CARD)
+    row1.pack(fill="x", pady=(0, 8))
+    field_label(row1, "Quality:").pack(side="left")
+    dark_option_menu(row1, quality_var, ("2160", "1440", "1080", "720")).pack(
+        side="left", padx=(6, 4))
+    hint_label(row1, "(2160 = 4K, 1440 = 2K)").pack(side="left", padx=(0, 18))
+    field_label(row1, "Limit (optional):").pack(side="left")
+    dark_entry(row1, limit_var, 8).pack(side="left", padx=(6, 0))
+    hint_label(row1, "khaali = saari videos").pack(side="left", padx=(6, 0))
+    btns1 = tk.Frame(card1, bg=COL_CARD)
+    btns1.pack(fill="x")
+    b_download = primary_btn(btns1, "Download Only", COL_GREEN,
+                             COL_GREEN_ACTIVE,
+                             lambda: run_action("download_only"))
+    b_download.pack(side="left", fill="x", expand=True, padx=(0, 6))
+    b_check = secondary_btn(btns1, "Sirf Check",
+                            lambda: run_action("check"))
+    b_check.pack(side="left")
+    buttons += [b_download, b_check]
 
-    tk.Label(
-        root,
-        text="Target ki misaal: mind-maze-yt / mind-maze-fb / horror-fb "
-             "— khaali chhor do to saare targets.",
-        anchor="w",
-    ).pack(fill="x", padx=10)
+    # ---------- card 2: UPLOAD — YOUTUBE ----------
+    privacy_var = tk.StringVar(value="private")
+    card2 = make_card("UPLOAD — YOUTUBE", COL_ACCENT)
+    row2 = tk.Frame(card2, bg=COL_CARD)
+    row2.pack(fill="x", pady=(0, 8))
+    field_label(row2, "Privacy:").pack(side="left")
+    dark_option_menu(row2, privacy_var, PRIVACY_CHOICES, width=10).pack(
+        side="left", padx=(6, 4))
+    hint_label(row2, "Pipeline = pehle download, phir YouTube upload. "
+                     "Quality / Limit upar wale Download card se lagte hain."
+               ).pack(side="left", padx=(8, 0))
+    btns2 = tk.Frame(card2, bg=COL_CARD)
+    btns2.pack(fill="x")
+    b_test1 = secondary_btn(btns2, "Pipeline Test — Pehli 1 Video",
+                            lambda: run_action("pipeline_test1"))
+    b_test1.pack(side="left", padx=(0, 6))
+    b_pipeline = primary_btn(btns2, "Pipeline — Download + Upload",
+                             COL_ACCENT, COL_ACCENT_ACTIVE,
+                             lambda: run_action("pipeline"))
+    b_pipeline.pack(side="left", fill="x", expand=True)
+    buttons += [b_test1, b_pipeline]
 
-    tk.Label(
-        root,
-        text="Quality: 2160 = 4K, 1440 = 2K — sirf download wale "
-             "buttons (2, 3, 4) pe lagti hai.",
-        anchor="w",
-    ).pack(fill="x", padx=10)
+    # ---------- card 3: MULTI UPLOAD — FACEBOOK + YOUTUBE ----------
+    target_var = tk.StringVar()
+    card3 = make_card("MULTI UPLOAD — FACEBOOK + YOUTUBE", COL_PURPLE)
+    row3 = tk.Frame(card3, bg=COL_CARD)
+    row3.pack(fill="x", pady=(0, 8))
+    field_label(row3, "Target:").pack(side="left")
+    target_box = ttk.Combobox(row3, textvariable=target_var,
+                              values=TARGET_PRESETS, style="Dark.TCombobox",
+                              width=20, font=FONT_UI)
+    target_box.pack(side="left", padx=(6, 4))
+    hint_label(row3, "preset chuno ya khud likho — khaali = saare targets"
+               ).pack(side="left", padx=(8, 0))
+    btns3 = tk.Frame(card3, bg=COL_CARD)
+    btns3.pack(fill="x")
+    b_mcheck = secondary_btn(btns3, "Multi Check",
+                             lambda: run_action("multi_check"))
+    b_mcheck.pack(side="left", padx=(0, 6))
+    b_multi = primary_btn(btns3, "Multi Upload", COL_PURPLE,
+                          COL_PURPLE_ACTIVE,
+                          lambda: run_action("multi_upload"))
+    b_multi.pack(side="left", fill="x", expand=True)
+    buttons += [b_mcheck, b_multi]
 
-    # --- log area ---
-    log = scrolledtext.ScrolledText(root, wrap="word", height=22)
-    log.pack(fill="both", expand=True, padx=10, pady=10)
+    # ---------- progress bar ----------
+    prow = tk.Frame(main, bg=COL_BG)
+    prow.pack(fill="x", pady=(2, 8))
+    progress = ttk.Progressbar(prow, style="Modern.Horizontal.TProgressbar",
+                               mode="indeterminate")
+    progress.pack(side="left", fill="x", expand=True)
+    progress_text = tk.StringVar(value="")
+    tk.Label(prow, textvariable=progress_text, font=FONT_SMALL,
+             bg=COL_BG, fg=COL_MUTED, width=16, anchor="e").pack(
+        side="right", padx=(8, 0))
+
+    # ---------- live log ----------
+    tk.Label(main, text="Live Log", font=FONT_SECTION,
+             bg=COL_BG, fg=COL_TEXT).pack(anchor="w")
+    log = scrolledtext.ScrolledText(
+        main, wrap="word", height=12, bg=COL_LOG_BG, fg=COL_LOG_FG,
+        insertbackground=COL_LOG_FG, font=FONT_LOG, relief="flat",
+        highlightthickness=1, highlightbackground=COL_BORDER)
+    log.pack(fill="both", expand=True, pady=(4, 10))
+    try:
+        log.vbar.config(bg=COL_BTN, troughcolor=COL_CARD,
+                        activebackground=COL_BTN_ACTIVE, relief="flat")
+    except (tk.TclError, AttributeError):
+        pass
 
     def write_log(text):
         log.insert("end", text)
         log.see("end")
 
-    # --- buttons ---
-    btn_frame = tk.Frame(root)
-    btn_frame.pack(fill="x", padx=10, pady=(0, 10))
+    # ---------- bottom bar ----------
+    bottom = tk.Frame(main, bg=COL_BG)
+    bottom.pack(fill="x")
+    stop_btn = tk.Button(
+        bottom, text="Stop", command=lambda: stop_proc(),
+        bg=COL_RED, fg="#ffffff", activebackground=COL_RED_ACTIVE,
+        activeforeground="#ffffff", relief="flat", bd=0, font=FONT_BTN,
+        padx=16, pady=8, cursor="hand2", state="disabled",
+        disabledforeground="#e8b4b1")
+    stop_btn.pack(side="left")
+    folder_btn = tk.Button(
+        bottom, text="Project Folder Kholo", command=lambda: open_folder(),
+        bg=COL_BTN, fg=COL_TEXT, activebackground=COL_BTN_ACTIVE,
+        activeforeground=COL_TEXT, relief="flat", bd=0, font=FONT_BTN,
+        padx=14, pady=8, cursor="hand2")
+    folder_btn.pack(side="left", padx=(8, 0))
+    tk.Label(bottom,
+             text="Tip: pehle Check, phir Test (1 video), phir Full.",
+             font=FONT_SMALL, bg=COL_BG, fg=COL_MUTED).pack(side="right")
 
-    buttons = []
-
+    # ---------- run / stop logic ----------
     def set_buttons(enabled):
         st = "normal" if enabled else "disabled"
         for b in buttons:
@@ -243,12 +481,33 @@ def _build_gui(tk, scrolledtext):
             while True:
                 item = out_queue.get_nowait()
                 if isinstance(item, tuple) and item and item[0] == "__EXIT__":
+                    code = item[1]
+                    was_stopped = state["stopped"]
                     state["running"] = False
                     state["proc"] = None
                     set_buttons(True)
-                    write_log(f"\nKHATAM — exit code {item[1]}\n")
+                    stop_btn.config(state="disabled")
+                    progress.stop()
+                    if was_stopped:
+                        progress.config(mode="determinate", value=0)
+                        progress_text.set("Ruk gaya")
+                        set_status("● Ruk gaya", COL_RED)
+                    elif code == 0:
+                        progress.config(mode="determinate", value=100)
+                        progress_text.set("100%")
+                        set_status("● Ho gaya ✓", COL_GREEN)
+                    else:
+                        progress.config(mode="determinate", value=0)
+                        progress_text.set("Error")
+                        set_status("● Error", COL_RED)
+                    write_log(f"\nKHATAM — exit code {code}\n")
                 else:
                     write_log(item)
+                    pct = parse_progress(item)
+                    if pct is not None and state["running"]:
+                        progress.stop()
+                        progress.config(mode="determinate", value=pct)
+                        progress_text.set(f"{pct:g}%")
         except queue.Empty:
             pass
         root.after(100, poll_queue)
@@ -284,43 +543,42 @@ def _build_gui(tk, scrolledtext):
             proc = subprocess.Popen(cmd, **popen_kwargs)
         except Exception as e:  # noqa: BLE001 — GUI ko crash nahi karna
             write_log(f"ERROR: command chal nahi saka — {e}\n")
+            set_status("● Error", COL_RED)
             return
         state["proc"] = proc
         state["running"] = True
+        state["stopped"] = False
         set_buttons(False)
+        stop_btn.config(state="normal")
+        set_status("● Chal raha hai…", COL_ACCENT)
+        progress.config(mode="indeterminate")
+        progress.start(12)
+        progress_text.set("Chal raha hai…")
         threading.Thread(target=reader, args=(proc,), daemon=True).start()
 
     def stop_proc():
         proc = state.get("proc")
         if proc is not None and state["running"]:
+            state["stopped"] = True
             write_log("\n--- Stop dabya — process band kar raha hoon... ---\n")
             try:
                 proc.terminate()
             except Exception:  # noqa: BLE001
                 pass
 
-    specs = [
-        ("1. Sirf Check (Pipeline)", "check"),
-        ("2. Download Only", "download_only"),
-        ("3. Pipeline — Pehli 1 Video (Test)", "pipeline_test1"),
-        ("4. Pipeline Chalao (Download + Upload)", "pipeline"),
-        ("5. Multi Upload — Check", "multi_check"),
-        ("6. Multi Upload Chalao (FB + YT)", "multi_upload"),
-    ]
-    for i, (label, action) in enumerate(specs):
-        b = tk.Button(
-            btn_frame, text=label, width=38,
-            command=lambda a=action: run_action(a),
-        )
-        b.grid(row=i // 2, column=i % 2, padx=4, pady=3, sticky="ew")
-        buttons.append(b)
-    tk.Button(
-        btn_frame, text="Stop", width=38, command=stop_proc,
-    ).grid(row=3, column=0, columnspan=2, padx=4, pady=3, sticky="ew")
-    btn_frame.columnconfigure(0, weight=1)
-    btn_frame.columnconfigure(1, weight=1)
+    def open_folder():
+        try:
+            startfile = getattr(os, "startfile", None)
+            if startfile is not None:
+                startfile(BASE_DIR)  # Windows
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", BASE_DIR])
+            else:
+                subprocess.Popen(["xdg-open", BASE_DIR])
+        except Exception as e:  # noqa: BLE001 — GUI ko crash nahi karna
+            write_log(f"\nFolder khul nahi saka — {e}\nPath: {BASE_DIR}\n")
 
-    write_log("Bulk Tool ready hai. Pehle '1. Sirf Check' dabao.\n")
+    write_log("Bulk Tool ready hai. Pehle kisi bhi card se 'Check' dabao.\n")
     write_log(f"Folder: {BASE_DIR}\n")
     root.after(100, poll_queue)
     root.mainloop()
