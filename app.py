@@ -28,8 +28,8 @@ Chalana (Windows laptop):
 
 Sections / buttons aur un ke terminal commands:
     DOWNLOAD card:
-      Download Only            -> python pipeline.py --download-only [--limit N] --quality <quality>
-      Sirf Check               -> python pipeline.py --check
+      Download Only            -> python pipeline.py --download-only [--limit N] --quality <quality> [--downloads <folder>]
+      Sirf Check               -> python pipeline.py --check [--downloads <folder>]
     UPLOAD — YOUTUBE card:
       Pipeline Test (1 video)  -> python pipeline.py --limit 1 --privacy <privacy> --quality <quality>
       Pipeline (Download+Upload) -> python pipeline.py --privacy <privacy> [--limit N] --quality <quality>
@@ -43,6 +43,14 @@ Sections / buttons aur un ke terminal commands:
 
 Quality dropdown: 2160 = 4K (default), 1440 = 2K, 1080, 720 —
 sirf download wale actions pe lagti hai.
+
+Download Folder (Download card): Browse… se koi bhi folder chun
+sakte ho jahan downloads jayengi — default project ka downloads/
+folder entry mein pehle se likha hota hai, Reset usay wapas le
+aata hai. Ye folder pipeline ke download wale actions aur Check
+ko --downloads se pass hota hai; upload flow bhi usi folder se
+videos uthata hai (uploads.csv wahi se banti hai). Multi Upload
+ko ye pass NAHI hota — wahan queue ki rows hi sab kuch hain.
 """
 import os
 import re
@@ -127,36 +135,54 @@ def _parse_quality(quality):
     return q
 
 
-def build_command(action, limit="", target="", privacy="private", quality="2160"):
+def build_command(action, limit="", target="", privacy="private", quality="2160",
+                  download_dir=""):
     """Action -> command list. Pure function — koi window, koi subprocess nahi.
 
     Script names app wale folder ke relative hain; GUI in ko
     cwd=BASE_DIR ke sath chalati hai.
+
+    download_dir: pipeline ke download wale actions (download_only,
+    pipeline_test1, pipeline) aur check ko --downloads se pass hota
+    hai — check bhi usi folder ko scan karke uploads.csv banata hai.
+    Khaali/whitespace ho to pass NAHI hota (pipeline ka apna default
+    downloads/ lagta hai). Multi actions ko kabhi pass nahi hota.
     """
     py = sys.executable
     lim = _parse_limit(limit)
     tgt = (target or "").strip()
     q = _parse_quality(quality)
+    dl = (download_dir or "").strip()
 
     if action == "check":
-        return [py, "pipeline.py", "--check"]
+        cmd = [py, "pipeline.py", "--check"]
+        if dl:
+            cmd += ["--downloads", dl]
+        return cmd
 
     if action == "download_only":
         cmd = [py, "pipeline.py", "--download-only"]
         if lim is not None:
             cmd += ["--limit", str(lim)]
         cmd += ["--quality", q]
+        if dl:
+            cmd += ["--downloads", dl]
         return cmd
 
     if action == "pipeline_test1":
-        return [py, "pipeline.py", "--limit", "1",
-                "--privacy", _parse_privacy(privacy), "--quality", q]
+        cmd = [py, "pipeline.py", "--limit", "1",
+               "--privacy", _parse_privacy(privacy), "--quality", q]
+        if dl:
+            cmd += ["--downloads", dl]
+        return cmd
 
     if action == "pipeline":
         cmd = [py, "pipeline.py", "--privacy", _parse_privacy(privacy)]
         if lim is not None:
             cmd += ["--limit", str(lim)]
         cmd += ["--quality", q]
+        if dl:
+            cmd += ["--downloads", dl]
         return cmd
 
     if action == "multi_check":
@@ -229,12 +255,12 @@ def _build_gui(tk, scrolledtext):
     import queue
     import subprocess
     import threading
-    from tkinter import ttk
+    from tkinter import filedialog, ttk
 
     root = tk.Tk()
     root.title("Bulk Tool")
-    root.geometry("900x680")
-    root.minsize(820, 620)
+    root.geometry("900x720")
+    root.minsize(820, 660)
     root.configure(bg=COL_BG)
 
     # ttk styles — clam theme pe progress bar / combobox ke rang lagte hain
@@ -313,6 +339,13 @@ def _build_gui(tk, scrolledtext):
             relief="flat", bd=0, font=FONT_BTN, padx=14, pady=10,
             cursor="hand2", disabledforeground=COL_MUTED)
 
+    def small_btn(parent, text, command):
+        return tk.Button(
+            parent, text=text, command=command, bg=COL_BTN, fg=COL_TEXT,
+            activebackground=COL_BTN_ACTIVE, activeforeground=COL_TEXT,
+            relief="flat", bd=0, font=FONT_UI, padx=10, pady=5,
+            cursor="hand2", disabledforeground=COL_MUTED)
+
     def make_card(title, accent):
         card = tk.Frame(main, bg=COL_CARD, padx=14, pady=12,
                         highlightthickness=1, highlightbackground=COL_BORDER)
@@ -357,6 +390,28 @@ def _build_gui(tk, scrolledtext):
     field_label(row1, "Limit (optional):").pack(side="left")
     dark_entry(row1, limit_var, 8).pack(side="left", padx=(6, 0))
     hint_label(row1, "khaali = saari videos").pack(side="left", padx=(6, 0))
+    # Download Folder row — default project ka downloads/ entry mein
+    # pehle se likha hai taake user ko pata ho files kahan jati hain.
+    default_downloads = os.path.join(BASE_DIR, "downloads")
+    download_dir_var = tk.StringVar(value=default_downloads)
+
+    def browse_folder():
+        chosen = filedialog.askdirectory(
+            initialdir=download_dir_var.get() or BASE_DIR,
+            title="Download folder chuno")
+        if chosen:
+            download_dir_var.set(chosen)
+
+    def reset_folder():
+        download_dir_var.set(default_downloads)
+
+    row1b = tk.Frame(card1, bg=COL_CARD)
+    row1b.pack(fill="x", pady=(0, 8))
+    field_label(row1b, "Download Folder:").pack(side="left")
+    dark_entry(row1b, download_dir_var, 52).pack(
+        side="left", fill="x", expand=True, padx=(6, 6))
+    small_btn(row1b, "Browse…", browse_folder).pack(side="left", padx=(0, 6))
+    small_btn(row1b, "Reset", reset_folder).pack(side="left")
     btns1 = tk.Frame(card1, bg=COL_CARD)
     btns1.pack(fill="x")
     b_download = primary_btn(btns1, "Download Only", COL_GREEN,
@@ -522,6 +577,7 @@ def _build_gui(tk, scrolledtext):
                 target=target_var.get(),
                 privacy=privacy_var.get(),
                 quality=quality_var.get(),
+                download_dir=download_dir_var.get(),
             )
         except ValueError as e:
             write_log(f"\nERROR: {e}\n")

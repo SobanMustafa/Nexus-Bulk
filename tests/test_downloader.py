@@ -36,7 +36,19 @@ def test_quality_defaults():
     print("PASS: quality defaults (default 2160=4K, choices 720/1080/1440/2160)")
 
 
+def test_downloads_flag():
+    # default wahi purana project downloads/ folder — behaviour unchanged
+    args = downloader.parse_args([])
+    assert args.downloads == downloader.DOWNLOADS_DIR, args.downloads
+    assert args.quality == downloader.DEFAULT_QUALITY
+    # override parse hota hai
+    args = downloader.parse_args(["--downloads", "/tmp/customdl"])
+    assert args.downloads == "/tmp/customdl", args.downloads
+    print("PASS: --downloads flag (default = downloads/, override parse hota hai)")
+
+
 if __name__ == "__main__":
     test_build_format()
     test_quality_defaults()
+    test_downloads_flag()
     print("ALL LOGIC TESTS PASS")

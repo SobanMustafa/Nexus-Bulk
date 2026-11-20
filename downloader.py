@@ -20,6 +20,7 @@ Chalana (Windows, PowerShell):
     pip install yt-dlp
     python downloader.py            # urls.txt se sab download (default quality 2160 = 4K)
     python downloader.py --quality 1440  # 2K pe download
+    python downloader.py --downloads "D:/Mind maze/Videos"  # downloads is folder me jayengi
     python downloader.py --dry-run  # pehle check karo, download nahi
 
 Chalana (is VM / Linux):
@@ -101,14 +102,14 @@ def make_progress_hook(tag):
 
 def download_one(args):
     """Aik URL download karo. Worker index se alag archive file, end pe merge hoti hai."""
-    idx, url, dry_run, fmt = args
+    idx, url, dry_run, fmt, downloads_dir = args
     worker = idx % MAX_WORKERS
     archive = os.path.join(BASE_DIR, f".archive_{worker}.txt")
     tag = f"worker-{worker + 1} #{idx + 1}"
 
     ydl_opts = {
         "format": fmt,
-        "outtmpl": os.path.join(DOWNLOADS_DIR, "%(title)s [%(id)s].%(ext)s"),
+        "outtmpl": os.path.join(downloads_dir, "%(title)s [%(id)s].%(ext)s"),
         "restrictfilenames": False,
         "windowsfilenames": True,          # Windows-safe naam
         "retries": RETRIES,
@@ -160,7 +161,7 @@ def merge_archives():
             f.writelines(lines)
 
 
-def main():
+def parse_args(argv=None):
     parser = argparse.ArgumentParser(description="Apna Bulk Downloader V1")
     parser.add_argument("--dry-run", action="store_true",
                         help="Sirf check karo — kuch download nahi hoga")
@@ -172,13 +173,21 @@ def main():
                         help="yt-dlp format override — ye diya jaye to --quality ignore "
                              "hota hai. Test ke liye 'worst' bhi de sakte ho.")
     parser.add_argument("--urls", default=URLS_FILE, help="Queue file (default: urls.txt)")
-    args = parser.parse_args()
+    parser.add_argument("--downloads", default=DOWNLOADS_DIR,
+                        help="Downloads is folder me jayengi "
+                             "(default: project ka downloads/ folder)")
+    return parser.parse_args(argv)
+
+
+def main():
+    args = parse_args()
 
     fmt = args.format if args.format else build_format(args.quality)
 
-    os.makedirs(DOWNLOADS_DIR, exist_ok=True)
+    os.makedirs(args.downloads, exist_ok=True)
     urls = load_urls(args.urls)
     log(f"Queue: {len(urls)} URL(s) — max {MAX_WORKERS} concurrent, {RETRIES} retries")
+    log(f"Download folder: {args.downloads}")
     if args.format:
         log(f"Quality: custom --format override use ho raha hai: {args.format}")
     else:
@@ -189,7 +198,7 @@ def main():
     t0 = time.time()
     results = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
-        jobs = [(i, u, args.dry_run, fmt) for i, u in enumerate(urls)]
+        jobs = [(i, u, args.dry_run, fmt, args.downloads) for i, u in enumerate(urls)]
         results = list(pool.map(download_one, jobs))
 
     if not args.dry_run:

@@ -23,10 +23,10 @@ neeche **Live Log** mein live nazar aata hai:
 
 | Button | Peeche wala command |
 |---|---|
-| Download Only (Download card) | `python pipeline.py --download-only --quality <quality>` |
-| Sirf Check (Download card) | `python pipeline.py --check` |
-| Pipeline Test — Pehli 1 Video (YouTube card) | `python pipeline.py --limit 1 --privacy <privacy> --quality <quality>` |
-| Pipeline — Download + Upload (YouTube card) | `python pipeline.py --privacy <privacy> --quality <quality>` |
+| Download Only (Download card) | `python pipeline.py --download-only --quality <quality> --downloads <folder>` |
+| Sirf Check (Download card) | `python pipeline.py --check --downloads <folder>` |
+| Pipeline Test — Pehli 1 Video (YouTube card) | `python pipeline.py --limit 1 --privacy <privacy> --quality <quality> --downloads <folder>` |
+| Pipeline — Download + Upload (YouTube card) | `python pipeline.py --privacy <privacy> --quality <quality> --downloads <folder>` |
 | Multi Check (Multi card) | `python multi_upload.py --check` |
 | Multi Upload (Multi card) | `python multi_upload.py` |
 
@@ -42,6 +42,13 @@ neeche **Live Log** mein live nazar aata hai:
 - **Quality** (Download card): 2160 = **4K** (default), 1440 =
   **2K**, 1080, 720 — sirf download wale actions pe lagti hai.
   Bari quality = bari file, slow download.
+- **Download Folder** (Download card): **Browse…** se koi bhi
+  folder chun sakte ho — downloads wahan jayengi. Entry mein
+  default project ka `downloads/` folder pehle se likha hota
+  hai, **Reset** usay wapas le aata hai. Upload flow bhi **usi
+  folder** se videos uthata hai (`uploads.csv` wahi se banti
+  hai), is liye folder badlo to pehle wali downloads naye folder
+  mein nahi milengi — unhein wahan pehle se hona chahiye.
 - **Stop** button chalti hui command ko band kar deta hai, aur
   command khatam honay pe log mein `KHATAM — exit code X` ata
   hai. **Project Folder Kholo** button project ka folder khol
@@ -54,7 +61,8 @@ neeche **Live Log** mein live nazar aata hai:
 
 - **Bulk Download (downloader.py)** — `urls.txt` se poori queue, hundreds
   of links; quality **selectable hai — default 2160 (4K), 1440 (2K),
-  1080, 720** (`--quality` flag); 3 parallel fragments per video; aik
+  1080, 720** (`--quality` flag); download folder `--downloads`
+  se badal sakte ho (default `downloads/`); 3 parallel fragments per video; aik
   sath max 3 videos; **3 retries**; videos ke beech 5s sleep;
   `download_archive.txt` se jo download ho gaya wo dobara nahi hota;
   aadhi download resume; live per-video progress; fail hui URLs
@@ -73,7 +81,8 @@ neeche **Live Log** mein live nazar aata hai:
   tags ≤500, category auto-map) → uploader chal jata hai, default
   private. Modes: `--check`, `--download-only`, `--upload-only`,
   `--limit N`, `--privacy`, `--quality` (download quality,
-  default 2160 = 4K).
+  default 2160 = 4K), `--downloads <folder>` (download folder —
+  check bhi usi folder ko scan karta hai).
 - **Multi-Page (multi_upload.py + fb_uploader.py)** — Facebook Pages +
   YouTube channels, **aik hi tool**: `pages.json` registry (aik entry =
   aik page/channel, har destination ka alag token/auth aur alag data),
@@ -209,6 +218,7 @@ Success = Reel us page pe PUBLISHED, aur
 # Downloader
 python downloader.py                     # urls.txt ki poori queue download (default quality 2160 = 4K)
 python downloader.py --quality 1440      # 2K pe download (choices: 720 / 1080 / 1440 / 2160)
+python downloader.py --downloads "D:\Mind maze\Videos"   # downloads is folder me (default: project ka downloads/)
 python downloader.py --dry-run           # sirf check (network chahiye)
 
 # YouTube uploader (single channel)
@@ -225,6 +235,7 @@ python pipeline.py --download-only       # sirf download + uploads.csv
 python pipeline.py --upload-only         # download skip, upload karo
 python pipeline.py --privacy unlisted    # default private hai
 python pipeline.py --quality 1440        # download quality: 2160=4K (default), 1440=2K, 1080, 720
+python pipeline.py --downloads "D:\Mind maze\Videos"   # downloads is folder me + upload bhi wahi se (check pe bhi yahi folder scan hota hai)
 
 # Multi-page
 python multi_upload.py --check                       # sab validate, NO upload/login

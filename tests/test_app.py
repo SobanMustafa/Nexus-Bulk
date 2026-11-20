@@ -108,4 +108,28 @@ assert app.parse_progress("") is None
 assert app.parse_progress(None) is None
 print("PASS: (h) parse_progress yt-dlp lines / 100% / no-percent -> None")
 
+# (i) download_dir — pipeline ke download wale actions + check pe
+# --downloads pass hoti hai (check bhi usi folder ko scan karta hai),
+# multi pe KABHI nahi, khaali/whitespace = pass nahi hoti, strip hoti hai
+DL = "/tmp/custom downloads"
+assert app.build_command("download_only", download_dir=DL) == [
+    PY, "pipeline.py", "--download-only", "--quality", "2160", "--downloads", DL]
+assert app.build_command("pipeline_test1", download_dir=DL) == [
+    PY, "pipeline.py", "--limit", "1", "--privacy", "private",
+    "--quality", "2160", "--downloads", DL]
+assert app.build_command("pipeline", download_dir=DL) == [
+    PY, "pipeline.py", "--privacy", "private", "--quality", "2160",
+    "--downloads", DL]
+assert app.build_command("check", download_dir=DL) == [
+    PY, "pipeline.py", "--check", "--downloads", DL]
+for a in ("multi_check", "multi_upload"):
+    cmd = app.build_command(a, target="mind-maze-yt", limit="2", download_dir=DL)
+    assert "--downloads" not in cmd, f"{a} ko --downloads pass ho gaya: {cmd}"
+for a in ("check", "download_only", "pipeline_test1", "pipeline"):
+    assert "--downloads" not in app.build_command(a, download_dir="")
+    assert "--downloads" not in app.build_command(a, download_dir="   ")
+assert app.build_command("check", download_dir="  /tmp/x  ")[-2:] == \
+    ["--downloads", "/tmp/x"]
+print("PASS: (i) download_dir -> --downloads (download actions + check), multi exclude, empty exclude")
+
 print("ALL LOGIC TESTS PASS")
