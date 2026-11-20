@@ -9,6 +9,36 @@ Pehle ye chaar hisse alag folders mein thay (V1 downloader, V2 uploader,
 pipeline, multi-page) — ab sab **aik flat project** mein hai. Har script
 akela bhi chalta hai, aur pipeline/multi in ko jodte hain.
 
+## GUI App (buttons wali window)
+
+Terminal ki bajaye buttons se chalana ho to **`run.bat` pe
+double-click** karo — ya terminal se `python app.py`. Aik window
+khul jati hai, andar se ye wahi terminal commands chalata hai,
+output neeche log mein live nazar aata hai:
+
+| Button | Peeche wala command |
+|---|---|
+| 1. Sirf Check (Pipeline) | `python pipeline.py --check` |
+| 2. Download Only | `python pipeline.py --download-only` |
+| 3. Pipeline — Pehli 1 Video (Test) | `python pipeline.py --limit 1 --privacy <privacy>` |
+| 4. Pipeline Chalao (Download + Upload) | `python pipeline.py --privacy <privacy>` |
+| 5. Multi Upload — Check | `python multi_upload.py --check` |
+| 6. Multi Upload Chalao (FB + YT) | `python multi_upload.py` |
+
+- **Limit** (optional): kitni videos — khaali = saari. Button 2
+  aur 4 pe lagta hai (button 3 pe hamesha 1 fix hai).
+- **Target** (optional): sirf aik destination, e.g.
+  `mind-maze-yt` / `mind-maze-fb` / `horror-fb` — Multi wale
+  buttons (5, 6) pe lagta hai; khaali = saare targets.
+- **Privacy**: private / unlisted / public (default **private**) —
+  sirf Pipeline wale buttons pe; Multi mein privacy queue ki
+  har row se aati hai.
+- **Stop** button chalti hui command ko band kar deta hai, aur
+  command khatam honay pe log mein `KHATAM — exit code X` ata hai.
+- tkinter Python ke sath **free** aata hai (python.org installer) —
+  kuch alag install nahi karna. Agar window na khule to app saaf
+  message de gi, aur terminal commands waise hi chalte rahenge.
+
 ## Features
 
 - **Bulk Download (downloader.py)** — `urls.txt` se poori queue, hundreds
