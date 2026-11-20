@@ -7,7 +7,9 @@ open-source stack pe: yt-dlp + FFmpeg.
 
 Spec (REA kit 2026-11-17 se, REA report ke baad adjust ho sakta hai):
 - urls.txt se queue — aik line pe aik URL, # wali lines comment hain
-- Max 1080p, 3 parallel fragments, 3 retries, 5s sleep videos ke beech
+- Quality selectable hai: default 2160 (4K), 1440 (2K), 1080, 720
+  (--quality flag se badlo); 3 parallel fragments, 3 retries,
+  5s sleep videos ke beech
 - download_archive.txt — dobara download nahi hota
 - Max 3 concurrent downloads, har video ki live progress terminal pe
 
@@ -16,7 +18,8 @@ re-upload karne ke liye nahi.
 
 Chalana (Windows, PowerShell):
     pip install yt-dlp
-    python downloader.py            # urls.txt se sab download
+    python downloader.py            # urls.txt se sab download (default quality 2160 = 4K)
+    python downloader.py --quality 1440  # 2K pe download
     python downloader.py --dry-run  # pehle check karo, download nahi
 
 Chalana (is VM / Linux):
@@ -39,7 +42,8 @@ URLS_FILE = os.path.join(BASE_DIR, "urls.txt")
 DOWNLOADS_DIR = os.path.join(BASE_DIR, "downloads")
 ARCHIVE_FILE = os.path.join(BASE_DIR, "download_archive.txt")
 
-MAX_HEIGHT = 1080          # 1080p cap
+QUALITY_CHOICES = [720, 1080, 1440, 2160]
+DEFAULT_QUALITY = 2160     # 4K — selectable: 720 / 1080 / 1440 (2K) / 2160 (4K)
 RETRIES = 3                # har video pe 3 retries
 FRAGMENT_RETRIES = 3
 CONCURRENT_FRAGMENTS = 3   # aik video ke andar parallel fragments
@@ -52,6 +56,13 @@ _print_lock = threading.Lock()
 def log(msg):
     with _print_lock:
         print(msg, flush=True)
+
+
+def build_format(max_height):
+    """yt-dlp format string — max_height tak ki best video + best audio,
+    warna us se neeche ki best. Source me jo best available hai wahi
+    milegi (upscale nahi hota)."""
+    return f"bestvideo[height<={max_height}]+bestaudio/best[height<={max_height}]/best"
 
 
 def load_urls(path):
@@ -153,21 +164,32 @@ def main():
     parser = argparse.ArgumentParser(description="Apna Bulk Downloader V1")
     parser.add_argument("--dry-run", action="store_true",
                         help="Sirf check karo — kuch download nahi hoga")
-    parser.add_argument("--format", default=f"bestvideo[height<={MAX_HEIGHT}]+bestaudio/best[height<={MAX_HEIGHT}]/best",
-                        help="yt-dlp format (default: 1080p cap). Test ke liye 'worst' bhi de sakte ho.")
+    parser.add_argument("--quality", type=int, choices=QUALITY_CHOICES,
+                        default=DEFAULT_QUALITY,
+                        help="Download quality (max height): 2160=4K (default), "
+                             "1440=2K, 1080, 720 — bari quality = bari file, slow download")
+    parser.add_argument("--format", default=None,
+                        help="yt-dlp format override — ye diya jaye to --quality ignore "
+                             "hota hai. Test ke liye 'worst' bhi de sakte ho.")
     parser.add_argument("--urls", default=URLS_FILE, help="Queue file (default: urls.txt)")
     args = parser.parse_args()
 
+    fmt = args.format if args.format else build_format(args.quality)
+
     os.makedirs(DOWNLOADS_DIR, exist_ok=True)
     urls = load_urls(args.urls)
-    log(f"Queue: {len(urls)} URL(s) — max {MAX_WORKERS} concurrent, 1080p cap, {RETRIES} retries")
+    log(f"Queue: {len(urls)} URL(s) — max {MAX_WORKERS} concurrent, {RETRIES} retries")
+    if args.format:
+        log(f"Quality: custom --format override use ho raha hai: {args.format}")
+    else:
+        log(f"Quality: {args.quality}p (max height {args.quality})")
     if args.dry_run:
         log("DRY RUN — kuch download nahi hoga")
 
     t0 = time.time()
     results = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
-        jobs = [(i, u, args.dry_run, args.format) for i, u in enumerate(urls)]
+        jobs = [(i, u, args.dry_run, fmt) for i, u in enumerate(urls)]
         results = list(pool.map(download_one, jobs))
 
     if not args.dry_run:

@@ -19,9 +19,9 @@ output neeche log mein live nazar aata hai:
 | Button | Peeche wala command |
 |---|---|
 | 1. Sirf Check (Pipeline) | `python pipeline.py --check` |
-| 2. Download Only | `python pipeline.py --download-only` |
-| 3. Pipeline — Pehli 1 Video (Test) | `python pipeline.py --limit 1 --privacy <privacy>` |
-| 4. Pipeline Chalao (Download + Upload) | `python pipeline.py --privacy <privacy>` |
+| 2. Download Only | `python pipeline.py --download-only --quality <quality>` |
+| 3. Pipeline — Pehli 1 Video (Test) | `python pipeline.py --limit 1 --privacy <privacy> --quality <quality>` |
+| 4. Pipeline Chalao (Download + Upload) | `python pipeline.py --privacy <privacy> --quality <quality>` |
 | 5. Multi Upload — Check | `python multi_upload.py --check` |
 | 6. Multi Upload Chalao (FB + YT) | `python multi_upload.py` |
 
@@ -33,6 +33,9 @@ output neeche log mein live nazar aata hai:
 - **Privacy**: private / unlisted / public (default **private**) —
   sirf Pipeline wale buttons pe; Multi mein privacy queue ki
   har row se aati hai.
+- **Quality**: 2160 = **4K** (default), 1440 = **2K**, 1080, 720 —
+  sirf download wale buttons (2, 3, 4) pe lagti hai. Bari quality
+  = bari file, slow download.
 - **Stop** button chalti hui command ko band kar deta hai, aur
   command khatam honay pe log mein `KHATAM — exit code X` ata hai.
 - tkinter Python ke sath **free** aata hai (python.org installer) —
@@ -42,10 +45,12 @@ output neeche log mein live nazar aata hai:
 ## Features
 
 - **Bulk Download (downloader.py)** — `urls.txt` se poori queue, hundreds
-  of links; max **1080p**; 3 parallel fragments per video; aik sath max
-  3 videos; **3 retries**; videos ke beech 5s sleep; `download_archive.txt`
-  se jo download ho gaya wo dobara nahi hota; aadhi download resume;
-  live per-video progress; fail hui URLs `failed.txt` mein.
+  of links; quality **selectable hai — default 2160 (4K), 1440 (2K),
+  1080, 720** (`--quality` flag); 3 parallel fragments per video; aik
+  sath max 3 videos; **3 retries**; videos ke beech 5s sleep;
+  `download_archive.txt` se jo download ho gaya wo dobara nahi hota;
+  aadhi download resume; live per-video progress; fail hui URLs
+  `failed.txt` mein.
 - **YouTube Upload (uploader.py)** — official YouTube Data API v3
   (`videos.insert`, OAuth 2.0, scope sirf `youtube.upload`), resumable
   upload (10 MB chunks), `uploads.csv` queue (title/description/tags/
@@ -59,7 +64,8 @@ output neeche log mein live nazar aata hai:
   `uploads.csv` **khud ban jati hai** (title ≤100, description ≤5,000,
   tags ≤500, category auto-map) → uploader chal jata hai, default
   private. Modes: `--check`, `--download-only`, `--upload-only`,
-  `--limit N`, `--privacy`.
+  `--limit N`, `--privacy`, `--quality` (download quality,
+  default 2160 = 4K).
 - **Multi-Page (multi_upload.py + fb_uploader.py)** — Facebook Pages +
   YouTube channels, **aik hi tool**: `pages.json` registry (aik entry =
   aik page/channel, har destination ka alag token/auth aur alag data),
@@ -85,7 +91,7 @@ output neeche log mein live nazar aata hai:
 | `urls.example.txt` | Download queue ki misaal → copy karke `urls.txt` banao |
 | `urls.txt` | Download queue (aik line = aik URL) — **GitHub pe NAHI** |
 | `requirements.txt` | yt-dlp + Google libs (FB ke liye sirf stdlib) |
-| `tests/` | Logic tests — teeno suites, no network, no login |
+| `tests/` | Logic tests — saari suites, no network, no login |
 | `downloads/` | Downloaded videos + `.info.json` + thumbnails yahan |
 | `videos/` | Uploader ke liye local videos yahan rakh sakte ho |
 | `tokens/` | FB Page token files (per page) — **GitHub pe NAHI** |
@@ -114,7 +120,8 @@ output neeche log mein live nazar aata hai:
    ```
    pip install -r requirements.txt
    ```
-3. **FFmpeg** (1080p video+audio merge ke liye):
+3. **FFmpeg** (video+audio merge ke liye — khaas tor pe 2K/4K pe
+   video aur audio alag streams mein ate hain):
    ```
    winget install Gyan.FFmpeg
    ```
@@ -192,7 +199,8 @@ Success = Reel us page pe PUBLISHED, aur
 
 ```
 # Downloader
-python downloader.py                     # urls.txt ki poori queue download
+python downloader.py                     # urls.txt ki poori queue download (default quality 2160 = 4K)
+python downloader.py --quality 1440      # 2K pe download (choices: 720 / 1080 / 1440 / 2160)
 python downloader.py --dry-run           # sirf check (network chahiye)
 
 # YouTube uploader (single channel)
@@ -208,6 +216,7 @@ python pipeline.py                       # poora end-to-end
 python pipeline.py --download-only       # sirf download + uploads.csv
 python pipeline.py --upload-only         # download skip, upload karo
 python pipeline.py --privacy unlisted    # default private hai
+python pipeline.py --quality 1440        # download quality: 2160=4K (default), 1440=2K, 1080, 720
 
 # Multi-page
 python multi_upload.py --check                       # sab validate, NO upload/login
@@ -278,6 +287,13 @@ ho to title), aur video seedha PUBLISHED jati hai.
 
 ## Caveats — saaf baat
 
+- **4K files bohat bari hoti hain** — download slow hoga aur disk
+  space bhi zyada lagega; roz ke kaam ke liye 1080 ya 1440 aksar
+  kaafi hota hai. YouTube ki 4K aam tor pe **webm** format mein
+  aati hai (mp4 lazmi nahi) — uploader webm bhi accept karta hai.
+  Aur agar source video hi 1080p ki hai to `--quality 2160` select
+  karne se quality **nahi** barhe gi — best available (1080p) hi
+  milegi, upscale nahi hota.
 - **Facebook upload LIVE TEST nahi hua** — flow Meta docs/guides se
   verified hai (2026-11-19), asal pehla test laptop pe
   `--target mind-maze-fb --limit 1` se hoga.
@@ -303,10 +319,13 @@ ho to title), aur video seedha PUBLISHED jati hai.
 ## Tests
 
 ```
+python tests/test_downloader.py  # downloader logic (build_format) — ALL LOGIC TESTS PASS
 python tests/test_uploader.py    # uploader logic — ALL LOGIC TESTS PASS
 python tests/test_pipeline.py    # pipeline logic — ALL LOGIC TESTS PASS
 python tests/test_multi.py       # multi + FB logic — ALL LOGIC TESTS PASS
+python tests/test_app.py         # GUI command logic — ALL LOGIC TESTS PASS
 ```
-Teeno suites no-network / no-login hain. Downloader ki alag logic
-suite nahi thi (uska engine yt-dlp khud hai) — us ka smoke test
-Step 2 wala `--dry-run` hai, jo network mangta hai.
+Saari suites no-network / no-login hain. Downloader ka asal smoke
+test Step 2 wala `--dry-run` hai, jo network mangta hai (uska
+engine yt-dlp khud hai); test_downloader sirf us ki pure logic
+(build_format, quality defaults) check karta hai.

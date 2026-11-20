@@ -22,19 +22,25 @@ Chalana (Windows laptop):
 
 Buttons aur un ke terminal commands:
     1. Sirf Check (Pipeline)   -> python pipeline.py --check
-    2. Download Only           -> python pipeline.py --download-only [--limit N]
-    3. Pipeline Test (1 video) -> python pipeline.py --limit 1 --privacy <privacy>
-    4. Pipeline Chalao         -> python pipeline.py --privacy <privacy> [--limit N]
+    2. Download Only           -> python pipeline.py --download-only [--limit N] --quality <quality>
+    3. Pipeline Test (1 video) -> python pipeline.py --limit 1 --privacy <privacy> --quality <quality>
+    4. Pipeline Chalao         -> python pipeline.py --privacy <privacy> [--limit N] --quality <quality>
     5. Multi Upload Check      -> python multi_upload.py --check [--target T]
     6. Multi Upload Chalao     -> python multi_upload.py [--target T] [--limit N]
        (multi mein privacy queue ki rows se aati hai, is liye
-        wahan --privacy pass nahi hota)
+        wahan --privacy pass nahi hota; quality download ke waqt
+        decide hoti hai, upload pe nahi, is liye multi ko --quality
+        bhi pass nahi hota)
+
+Quality dropdown: 2160 = 4K (default), 1440 = 2K, 1080, 720 —
+sirf download wale buttons (2, 3, 4) pe lagti hai.
 """
 import os
 import sys
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PRIVACY_CHOICES = ("private", "unlisted", "public")
+QUALITY_CHOICES = ("720", "1080", "1440", "2160")  # 1440 = 2K, 2160 = 4K
 
 # NOTE: tkinter yahan import NAHI hota — sirf main() ke andar,
 # taake `import app` baghair display ke bhi chal jaye (tests ke liye).
@@ -72,7 +78,17 @@ def _parse_privacy(privacy):
     return p
 
 
-def build_command(action, limit="", target="", privacy="private"):
+def _parse_quality(quality):
+    q = str(quality or "2160").strip()
+    if q not in QUALITY_CHOICES:
+        raise ValueError(
+            f"Quality ghalat hai: {quality!r} — in mein se aik ho: "
+            f"{', '.join(QUALITY_CHOICES)} (2160=4K, 1440=2K)"
+        )
+    return q
+
+
+def build_command(action, limit="", target="", privacy="private", quality="2160"):
     """Action -> command list. Pure function — koi window, koi subprocess nahi.
 
     Script names app wale folder ke relative hain; GUI in ko
@@ -81,6 +97,7 @@ def build_command(action, limit="", target="", privacy="private"):
     py = sys.executable
     lim = _parse_limit(limit)
     tgt = (target or "").strip()
+    q = _parse_quality(quality)
 
     if action == "check":
         return [py, "pipeline.py", "--check"]
@@ -89,16 +106,18 @@ def build_command(action, limit="", target="", privacy="private"):
         cmd = [py, "pipeline.py", "--download-only"]
         if lim is not None:
             cmd += ["--limit", str(lim)]
+        cmd += ["--quality", q]
         return cmd
 
     if action == "pipeline_test1":
         return [py, "pipeline.py", "--limit", "1",
-                "--privacy", _parse_privacy(privacy)]
+                "--privacy", _parse_privacy(privacy), "--quality", q]
 
     if action == "pipeline":
         cmd = [py, "pipeline.py", "--privacy", _parse_privacy(privacy)]
         if lim is not None:
             cmd += ["--limit", str(lim)]
+        cmd += ["--quality", q]
         return cmd
 
     if action == "multi_check":
@@ -171,12 +190,24 @@ def _build_gui(tk, scrolledtext):
     tk.Label(fields, text="Privacy:").grid(row=0, column=4, sticky="w")
     privacy_var = tk.StringVar(value="private")
     tk.OptionMenu(fields, privacy_var, *PRIVACY_CHOICES).grid(
-        row=0, column=5, padx=(4, 0), sticky="w")
+        row=0, column=5, padx=(4, 16), sticky="w")
+
+    tk.Label(fields, text="Quality:").grid(row=0, column=6, sticky="w")
+    quality_var = tk.StringVar(value="2160")
+    tk.OptionMenu(fields, quality_var, "2160", "1440", "1080", "720").grid(
+        row=0, column=7, padx=(4, 0), sticky="w")
 
     tk.Label(
         root,
         text="Target ki misaal: mind-maze-yt / mind-maze-fb / horror-fb "
              "— khaali chhor do to saare targets.",
+        anchor="w",
+    ).pack(fill="x", padx=10)
+
+    tk.Label(
+        root,
+        text="Quality: 2160 = 4K, 1440 = 2K — sirf download wale "
+             "buttons (2, 3, 4) pe lagti hai.",
         anchor="w",
     ).pack(fill="x", padx=10)
 
@@ -231,6 +262,7 @@ def _build_gui(tk, scrolledtext):
                 limit=limit_var.get(),
                 target=target_var.get(),
                 privacy=privacy_var.get(),
+                quality=quality_var.get(),
             )
         except ValueError as e:
             write_log(f"\nERROR: {e}\n")

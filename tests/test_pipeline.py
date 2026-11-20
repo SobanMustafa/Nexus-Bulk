@@ -22,6 +22,16 @@ def make_video_with_info(tmp, stem, info):
     return vid
 
 
+def test_build_format():
+    assert pipeline.build_format(2160) == \
+        "bestvideo[height<=2160]+bestaudio/best[height<=2160]/best"
+    assert "height<=1440" in pipeline.build_format(1440)
+    assert "height<=1080" in pipeline.build_format(1080)
+    assert "height<=720" in pipeline.build_format(720)
+    assert pipeline.DEFAULT_QUALITY == 2160  # default 4K
+    print("PASS: build_format (2160=4K default / 1440=2K / 1080 / 720)")
+
+
 def test_info_to_row_limits():
     info = {"title": "T" * 150, "description": "D" * 6000,
             "tags": ["a", "b" * 600, "c"], "categories": ["Entertainment"]}
@@ -125,6 +135,7 @@ def test_check_mode_no_login_no_upload():
 
 
 if __name__ == "__main__":
+    test_build_format()
     test_info_to_row_limits()
     test_info_to_row_defaults()
     test_build_csv_and_uploader_validate()

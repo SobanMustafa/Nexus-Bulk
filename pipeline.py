@@ -7,8 +7,9 @@ missing tha. Aik hi command — URL daalo, video upload ho jaye.
 
 Flow:
     urls.txt
-      -> yt-dlp download (V1 wali settings: 1080p cap, 3 retries,
-         5s sleep, download_archive) + .info.json metadata save
+      -> yt-dlp download (V1 wali settings: quality selectable,
+         default 2160 = 4K; 3 retries, 5s sleep, download_archive)
+         + .info.json metadata save
       -> downloads/ scan: har video + uski .info.json se
          title / description / tags / category nikalo
       -> uploads.csv auto-build (uploader V2 ke format mein)
@@ -31,12 +32,13 @@ Chalana (Windows laptop — PowerShell, is folder se):
     python pipeline.py                     # poora end-to-end
     python pipeline.py --limit 1           # pehle sirf 1 video se test
     python pipeline.py --privacy unlisted  # default private hai
+    python pipeline.py --quality 1440      # 2K download (default 2160 = 4K hai)
 
 Pehli dafa setup (sirf aik dafa, laptop pe):
   1. README.md ke YouTube setup (7 steps): Google Cloud project +
      YouTube Data API v3 + OAuth client ID (Desktop app) ->
      client_secrets.json isi project folder mein rakho.
-  2. FFmpeg chahiye (1080p merge ke liye): winget install Gyan.FFmpeg
+  2. FFmpeg chahiye (video+audio merge ke liye): winget install Gyan.FFmpeg
   3. python pipeline.py --limit 1 --download-only se pehla download
      test karo, phir python pipeline.py --limit 1 se pehli upload
      (private) test karo.
@@ -65,7 +67,8 @@ DEFAULT_DOWNLOADS = os.path.join(BASE_DIR, "downloads")
 DEFAULT_UPLOADER_DIR = BASE_DIR
 DEFAULT_ARCHIVE = os.path.join(BASE_DIR, "download_archive.txt")
 
-MAX_HEIGHT = 1080
+QUALITY_CHOICES = [720, 1080, 1440, 2160]
+DEFAULT_QUALITY = 2160  # 4K — selectable: 720 / 1080 / 1440 (2K) / 2160 (4K)
 RETRIES = 3
 SLEEP_BETWEEN = 5
 MAX_TITLE = 100
@@ -97,6 +100,13 @@ CATEGORY_MAP = {
 
 def log(msg):
     print(msg, flush=True)
+
+
+def build_format(max_height):
+    """yt-dlp format string — max_height tak ki best video + best audio,
+    warna us se neeche ki best. Source me jo best available hai wahi
+    milegi (upscale nahi hota)."""
+    return f"bestvideo[height<={max_height}]+bestaudio/best[height<={max_height}]/best"
 
 
 def load_urls(path):
@@ -243,15 +253,17 @@ def write_uploads_csv(rows, uploader_dir):
     return path
 
 
-def download_urls(urls, downloads_dir, archive, dry_run=False):
+def download_urls(urls, downloads_dir, archive, dry_run=False,
+                  max_height=DEFAULT_QUALITY):
     """yt-dlp se download + .info.json save. Returns (ok_urls, failed)."""
     try:
         import yt_dlp
     except ImportError:
         sys.exit("yt-dlp nahi mila. Pehle chalao:  pip install -r requirements.txt")
     os.makedirs(downloads_dir, exist_ok=True)
+    log(f"Quality: {max_height}p (max height {max_height})")
     ydl_opts = {
-        "format": f"bestvideo[height<={MAX_HEIGHT}]+bestaudio/best[height<={MAX_HEIGHT}]/best",
+        "format": build_format(max_height),
         "outtmpl": os.path.join(downloads_dir, "%(title)s [%(id)s].%(ext)s"),
         "restrictfilenames": False,
         "windowsfilenames": True,
@@ -308,6 +320,10 @@ def main(argv=None):
     parser.add_argument("--privacy", default=DEFAULT_PRIVACY,
                         choices=["private", "unlisted", "public"],
                         help="Default private — pehli video check karke phir public karo")
+    parser.add_argument("--quality", type=int, default=DEFAULT_QUALITY,
+                        choices=QUALITY_CHOICES,
+                        help="2160=4K (default), 1440=2K, 1080, 720 — "
+                             "bari quality = bari file, slow download")
     parser.add_argument("--limit", type=int, default=0,
                         help="Sirf pehli N URLs (test ke liye, e.g. --limit 1)")
     parser.add_argument("--download-only", action="store_true",
@@ -335,7 +351,7 @@ def main(argv=None):
     failed = []
     if not args.check and not args.upload_only:
         _, failed = download_urls(urls, downloads_dir, args.archive,
-                                  dry_run=args.dry_run)
+                                  dry_run=args.dry_run, max_height=args.quality)
         if args.dry_run:
             return 0 if not failed else 1
 
