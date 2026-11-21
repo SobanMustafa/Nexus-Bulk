@@ -40,7 +40,8 @@ Sections / buttons aur un ke terminal commands:
                                   python queuedl.py gui_queue.txt --quality Q --threads T [--downloads F] [cookies/proxy]
       Retry Failed / Remove Selected / Clear Finished / Clear All
                                -> sirf queue list ki safai (koi command nahi)
-      Neeche chhoti "Pipeline" row (purana flow, urls.txt wala):
+      Advanced toggle ke andar chhoti "Pipeline" row (purana flow,
+      urls.txt wala — section default band rehti hai):
       Sirf Check               -> python pipeline.py --check [--downloads <folder>]
       Download Only (urls.txt wali list)
                                -> python pipeline.py --download-only [--limit N] --quality <quality> [--downloads <folder>]
@@ -64,16 +65,20 @@ Threads dropdown (Download card): queue mode mein aik sath kitni
 downloads — 1/2/3/4/6/8/12/16, default 4. Zyada threads = tez,
 lekin net/CPU pe load bhi zyada.
 
-Cookies dropdown + Proxy entry (Download card): SIRF queue wale
-actions (DOWNLOAD ALL aur Grab) pe lagte hain — TikTok/Instagram
+Cookies dropdown (Download card) + Proxy entry (Advanced toggle
+ke andar): SIRF queue wale actions (DOWNLOAD ALL aur Grab) pe
+lagte hain — TikTok/Instagram
 ki login wali ya block honay wali videos ke liye browser cookies
 (Chrome/Edge/Firefox) ya cookies.txt file. Pipeline wale purane
 buttons pe cookies/proxy apply NAHI hote.
 
-Download Folder (Download card): Browse… se koi bhi folder chun
-sakte ho jahan downloads jayengi — default project ka downloads/
-folder entry mein pehle se likha hota hai, Reset usay wapas le
-aata hai. Ye folder pipeline ke download wale actions, Check aur
+Download Folder ("Videos kahan save hon:" — 1. LINKS section ki
+sab se pehli row, window khulte hi nazar aati hai): Browse… se
+koi bhi folder chun sakte ho jahan downloads jayengi — default
+project ka downloads/ folder entry mein pehle se likha hota hai,
+Folder Kholo us folder ko Explorer mein khol deta hai (na ho to
+pehle bana ke), Reset usay wapas le aata hai. Ye folder pipeline
+ke download wale actions, Check aur
 queue download ko --downloads se pass hota hai; upload flow bhi
 usi folder se videos uthata hai (uploads.csv wahi se banti hai).
 Multi Upload ko ye pass NAHI hota — wahan queue ki rows hi sab
@@ -517,8 +522,8 @@ def _build_gui(tk, scrolledtext):
 
     root = tk.Tk()
     root.title("Bulk Tool")
-    root.geometry("940x900")
-    root.minsize(860, 780)
+    root.geometry("940x760")
+    root.minsize(860, 680)
     root.configure(bg=BG)
 
     # ttk styles — clam theme pe progress bar / combobox ke rang lagte hain
@@ -559,6 +564,11 @@ def _build_gui(tk, scrolledtext):
     style.map("Dark.Treeview",
               background=[("selected", BLUE)],
               foreground=[("selected", "#ffffff")])
+    style.configure(
+        "Dark.Vertical.TScrollbar",
+        background=SLATE, troughcolor=BG, bordercolor=BORDER,
+        arrowcolor=TEXT, lightcolor=BORDER, darkcolor=BORDER,
+    )
 
     state = {"proc": None, "running": False, "stopped": False,
              "run_kind": None, "run_row_ids": []}
@@ -632,7 +642,7 @@ def _build_gui(tk, scrolledtext):
         tk.Frame(parent, bg=BORDER, height=1).pack(fill="x", pady=(4, 8))
 
     def make_card(heading=None):
-        card = tk.Frame(main, bg=PANEL, padx=14, pady=12,
+        card = tk.Frame(content, bg=PANEL, padx=14, pady=12,
                         highlightthickness=1, highlightbackground=BORDER)
         card.pack(fill="x", pady=(0, 10))
         if heading:
@@ -658,6 +668,41 @@ def _build_gui(tk, scrolledtext):
         status_var.set(text)
         status_lbl.config(fg=color)
 
+    # ---------- scrollable content ----------
+    # Header band FIXED rehta hai; us ke neeche ki saari cards is
+    # canvas ke andar scroll hoti hain — laptop ki chhoti screen pe
+    # bhi koi hissa hamesha ke liye ghayab nahi hota.
+    canvas = tk.Canvas(main, bg=BG, highlightthickness=0, bd=0,
+                       relief="flat")
+    canvas_scroll = ttk.Scrollbar(main, orient="vertical",
+                                  command=canvas.yview,
+                                  style="Dark.Vertical.TScrollbar")
+    canvas.configure(yscrollcommand=canvas_scroll.set)
+    canvas_scroll.pack(side="right", fill="y")
+    canvas.pack(side="left", fill="both", expand=True)
+    content = tk.Frame(canvas, bg=BG)
+    content_win = canvas.create_window((0, 0), window=content, anchor="nw")
+    content.bind(
+        "<Configure>",
+        lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+    canvas.bind(
+        "<Configure>",
+        lambda e: canvas.itemconfigure(content_win, width=e.width))
+
+    def _mousewheel(event):
+        if getattr(event, "num", None) == 4:
+            canvas.yview_scroll(-1, "units")
+        elif getattr(event, "num", None) == 5:
+            canvas.yview_scroll(1, "units")
+        elif getattr(event, "delta", 0):
+            steps = int(-event.delta / 120)
+            if steps:
+                canvas.yview_scroll(steps, "units")
+
+    root.bind_all("<MouseWheel>", _mousewheel)
+    root.bind_all("<Button-4>", _mousewheel)
+    root.bind_all("<Button-5>", _mousewheel)
+
     # ---------- card 1: DOWNLOAD (queue system) ----------
     quality_var = tk.StringVar(value="2160")
     limit_var = tk.StringVar()
@@ -671,9 +716,45 @@ def _build_gui(tk, scrolledtext):
     default_downloads = os.path.join(BASE_DIR, "downloads")
     download_dir_var = tk.StringVar(value=default_downloads)
     card1 = make_card()
+
+    def browse_folder():
+        chosen = filedialog.askdirectory(
+            initialdir=download_dir_var.get() or BASE_DIR,
+            title="Download folder chuno")
+        if chosen:
+            download_dir_var.set(chosen)
+
+    def reset_folder():
+        download_dir_var.set(default_downloads)
+
+    def open_download_folder():
+        path = download_dir_var.get().strip() or default_downloads
+        try:
+            os.makedirs(path, exist_ok=True)
+        except OSError as e:
+            write_log(f"\nFolder ban nahi saka — {e}\nPath: {path}\n")
+            return
+        open_folder(path)
+
+    section_heading(card1, "1. LINKS")
+    # 0) Download Folder — section ki SAB SE PEHLI row, taake window
+    # khulte hi saaf pata ho downloads kahan jati hain. (Pehle ye
+    # window ke bilkul neeche thi — laptop pe nazar hi nahi aati thi.)
+    tk.Label(card1, text="Videos kahan save hon:", font=FONT_BTN,
+             bg=PANEL, fg=TEXT).pack(anchor="w", pady=(0, 4))
+    dlrow = tk.Frame(card1, bg=PANEL)
+    dlrow.pack(fill="x")
+    dark_entry(dlrow, download_dir_var, 52).pack(
+        side="left", fill="x", expand=True, padx=(0, 6))
+    small_btn(dlrow, "Browse…", browse_folder).pack(side="left", padx=(0, 6))
+    small_btn(dlrow, "Folder Kholo", open_download_folder).pack(
+        side="left", padx=(0, 6))
+    small_btn(dlrow, "Reset", reset_folder).pack(side="left")
+    hint_label(card1, "Is folder ke andar platform / channel ke "
+                      "subfolder ban ke videos save hongi.").pack(
+        anchor="w", pady=(4, 10))
     # 1) Paste links box — links seedha yahan paste karo, urls.txt
     # edit karne ki zaroorat nahi.
-    section_heading(card1, "1. LINKS")
     tk.Label(card1,
              text="Video Links — yahan paste karo "
                   "(aik line = aik link: YouTube / TikTok / Facebook…)",
@@ -732,7 +813,7 @@ def _build_gui(tk, scrolledtext):
     tree_frame = tk.Frame(card1, bg=PANEL)
     tree_frame.pack(fill="x", pady=(0, 6))
     tree = ttk.Treeview(tree_frame, columns=("num", "link", "status"),
-                        show="headings", height=7, style="Dark.Treeview",
+                        show="headings", height=6, style="Dark.Treeview",
                         selectmode="extended")
     tree.heading("num", text="#")
     tree.heading("link", text="Link")
@@ -1001,7 +1082,7 @@ def _build_gui(tk, scrolledtext):
     field_label(row1, "Limit (optional):").pack(side="left")
     dark_entry(row1, limit_var, 8).pack(side="left", padx=(6, 0))
     hint_label(row1, "sirf purani pipeline pe").pack(side="left", padx=(6, 0))
-    # Cookies / Proxy row — sirf queue + grab pe lagte hain
+    # Cookies row — sirf queue + grab pe lagti hai (Proxy Advanced me hai)
     row1c = tk.Frame(card1, bg=PANEL)
     row1c.pack(fill="x", pady=(0, 8))
     field_label(row1c, "Cookies:").pack(side="left")
@@ -1021,36 +1102,39 @@ def _build_gui(tk, scrolledtext):
         pass
     cookies_menu.pack(side="left", padx=(6, 4))
     tk.Label(row1c, textvariable=cookies_file_var, font=FONT_SMALL,
-             bg=PANEL, fg=MUTED).pack(side="left", padx=(0, 14))
-    field_label(row1c, "Proxy (optional):").pack(side="left")
-    dark_entry(row1c, proxy_var, 22).pack(
+             bg=PANEL, fg=MUTED).pack(side="left")
+    # 7) Advanced — Proxy + purana pipeline flow (urls.txt wala
+    # tareeqa). Default BAND (collapsed) rehta hai — roz ke kaam ke
+    # liye zaroori nahi, is liye window saaf aur friendly rehti hai.
+    adv_state = {"open": False}
+    adv_frame = tk.Frame(card1, bg=PANEL)
+
+    def toggle_advanced():
+        if adv_state["open"]:
+            adv_frame.pack_forget()
+            adv_state["open"] = False
+            adv_btn.config(text="▸ Advanced (Proxy, Pipeline, Update)")
+        else:
+            adv_frame.pack(fill="x")
+            adv_state["open"] = True
+            adv_btn.config(text="▾ Advanced (Proxy, Pipeline, Update)")
+
+    adv_btn = small_btn(card1, "▸ Advanced (Proxy, Pipeline, Update)",
+                        toggle_advanced)
+    adv_btn.pack(anchor="w", pady=(2, 4))
+    # Proxy row (Advanced ke andar) — sirf queue + grab pe lagta hai
+    adv_proxy = tk.Frame(adv_frame, bg=PANEL)
+    adv_proxy.pack(fill="x", pady=(2, 8))
+    field_label(adv_proxy, "Proxy (optional):").pack(side="left")
+    dark_entry(adv_proxy, proxy_var, 22).pack(
         side="left", fill="x", expand=True, padx=(6, 0))
-    # 7) Download Folder row — default project ka downloads/ entry mein
-    # pehle se likha hai taake user ko pata ho files kahan jati hain.
-    def browse_folder():
-        chosen = filedialog.askdirectory(
-            initialdir=download_dir_var.get() or BASE_DIR,
-            title="Download folder chuno")
-        if chosen:
-            download_dir_var.set(chosen)
-
-    def reset_folder():
-        download_dir_var.set(default_downloads)
-
-    row1b = tk.Frame(card1, bg=PANEL)
-    row1b.pack(fill="x", pady=(0, 8))
-    field_label(row1b, "Download Folder:").pack(side="left")
-    dark_entry(row1b, download_dir_var, 52).pack(
-        side="left", fill="x", expand=True, padx=(6, 6))
-    small_btn(row1b, "Browse…", browse_folder).pack(side="left", padx=(0, 6))
-    small_btn(row1b, "Reset", reset_folder).pack(side="left")
-    # 8) Purana pipeline flow — chhoti row (urls.txt wala tareeqa)
-    tk.Frame(card1, bg=BORDER, height=1).pack(fill="x", pady=(4, 8))
-    tk.Label(card1,
+    # Purana pipeline flow — chhoti row (urls.txt wala tareeqa)
+    tk.Frame(adv_frame, bg=BORDER, height=1).pack(fill="x", pady=(4, 8))
+    tk.Label(adv_frame,
              text="Pipeline (urls.txt → download + YouTube upload CSV):",
              font=FONT_SMALL, bg=PANEL, fg=MUTED).pack(
         anchor="w", pady=(0, 6))
-    btns1 = tk.Frame(card1, bg=PANEL)
+    btns1 = tk.Frame(adv_frame, bg=PANEL)
     btns1.pack(fill="x")
     b_check = small_btn(btns1, "Sirf Check",
                         lambda: run_action("check"))
@@ -1119,7 +1203,7 @@ def _build_gui(tk, scrolledtext):
     buttons += [b_mcheck, b_multi]
 
     # ---------- progress bar ----------
-    prow = tk.Frame(main, bg=BG)
+    prow = tk.Frame(content, bg=BG)
     prow.pack(fill="x", pady=(2, 8))
     progress = ttk.Progressbar(prow, style="Modern.Horizontal.TProgressbar",
                                mode="indeterminate")
@@ -1130,10 +1214,10 @@ def _build_gui(tk, scrolledtext):
         side="right", padx=(8, 0))
 
     # ---------- live log ----------
-    tk.Label(main, text="Live Log", font=FONT_SECTION,
+    tk.Label(content, text="Live Log", font=FONT_SECTION,
              bg=BG, fg=BLUE_BRIGHT).pack(anchor="w")
     log = scrolledtext.ScrolledText(
-        main, wrap="word", height=8, bg=LOG_BG, fg=LOG_FG,
+        content, wrap="word", height=6, bg=LOG_BG, fg=LOG_FG,
         insertbackground=LOG_FG, font=FONT_LOG, relief="flat",
         highlightthickness=1, highlightbackground=BORDER)
     log.pack(fill="both", expand=True, pady=(4, 10))
@@ -1148,7 +1232,7 @@ def _build_gui(tk, scrolledtext):
         log.see("end")
 
     # ---------- bottom bar ----------
-    bottom = tk.Frame(main, bg=BG)
+    bottom = tk.Frame(content, bg=BG)
     bottom.pack(fill="x")
     stop_btn = tk.Button(
         bottom, text="Stop", command=lambda: stop_proc(),
@@ -1158,7 +1242,8 @@ def _build_gui(tk, scrolledtext):
         disabledforeground="#e8b4b1")
     stop_btn.pack(side="left")
     folder_btn = tk.Button(
-        bottom, text="Project Folder Kholo", command=lambda: open_folder(),
+        bottom, text="Project Folder Kholo",
+        command=lambda: open_folder(BASE_DIR),
         bg=SLATE, fg=TEXT, activebackground=SLATE_ACTIVE,
         activeforeground=TEXT, relief="flat", bd=0, font=FONT_BTN,
         padx=14, pady=8, cursor="hand2",
@@ -1206,6 +1291,8 @@ def _build_gui(tk, scrolledtext):
         if qd is not None:
             write_log(f"Queue khatam: Done {qd['done']}, "
                       f"Failed {qd['failed']}, Skipped {qd['skipped']}\n")
+            write_log("Videos is folder me hain: "
+                      f"{download_dir_var.get()}\n")
             return
         if s.startswith("QLOG "):
             write_log(s[len("QLOG "):] + "\n")
@@ -1327,17 +1414,17 @@ def _build_gui(tk, scrolledtext):
             except Exception:  # noqa: BLE001
                 pass
 
-    def open_folder():
+    def open_folder(path):
         try:
             startfile = getattr(os, "startfile", None)
             if startfile is not None:
-                startfile(BASE_DIR)  # Windows
+                startfile(path)  # Windows
             elif sys.platform == "darwin":
-                subprocess.Popen(["open", BASE_DIR])
+                subprocess.Popen(["open", path])
             else:
-                subprocess.Popen(["xdg-open", BASE_DIR])
+                subprocess.Popen(["xdg-open", path])
         except Exception as e:  # noqa: BLE001 — GUI ko crash nahi karna
-            write_log(f"\nFolder khul nahi saka — {e}\nPath: {BASE_DIR}\n")
+            write_log(f"\nFolder khul nahi saka — {e}\nPath: {path}\n")
 
     write_log("Bulk Tool ready hai. Pehle kisi bhi card se 'Check' dabao.\n")
     write_log(f"Folder: {BASE_DIR}\n")
