@@ -224,4 +224,175 @@ assert events[-1] == "GRABDONE 0"
 assert not any(e.startswith("GRAB ") for e in events)
 print("PASS: (l) run_grab failure -> GRABDONE 0")
 
+# --- Popular grab -----------------------------------------------------------
+import json  # noqa: E402 — popular sections ke liye
+
+# (m) parse_flat_entries — views present/missing, no-url skip, malformed -> []
+flat = json.dumps({"entries": [
+    {"webpage_url": "https://www.tiktok.com/@u/video/1", "view_count": 1500},
+    {"url": "https://www.tiktok.com/@u/video/2"},
+    {"webpage_url": "https://www.tiktok.com/@u/video/3", "view_count": 2.5e6},
+    {"view_count": 999},
+    {"webpage_url": "relative-id-only", "view_count": 5},
+    {"url": "https://www.tiktok.com/@u/video/4", "view_count": "bohat"},
+    "garbage-entry",
+]})
+entries = queuedl.parse_flat_entries(flat)
+assert entries == [
+    {"url": "https://www.tiktok.com/@u/video/1", "views": 1500},
+    {"url": "https://www.tiktok.com/@u/video/2", "views": None},
+    {"url": "https://www.tiktok.com/@u/video/3", "views": 2500000.0},
+    {"url": "https://www.tiktok.com/@u/video/4", "views": None},
+], entries
+assert queuedl.parse_flat_entries("{ye json nahi hai") == []
+assert queuedl.parse_flat_entries("") == []
+assert queuedl.parse_flat_entries(None) == []
+assert queuedl.parse_flat_entries('{"koi": "entries nahi"}') == []
+assert queuedl.parse_flat_entries('[1, 2, 3]') == []
+print("PASS: (m) parse_flat_entries views/missing/no-url/malformed")
+
+# (n) rank_popular — desc order, dedupe max, None last, top-N cut, stable ties
+ranked_in = [
+    {"url": "https://x/1", "views": 100},
+    {"url": "https://x/2", "views": 5000},
+    {"url": "https://x/3", "views": None},
+    {"url": "https://x/1", "views": 900},
+    {"url": "https://x/4", "views": 5000},
+    {"url": "https://x/5", "views": 50},
+]
+assert queuedl.rank_popular(ranked_in, 3) == \
+    ["https://x/2", "https://x/4", "https://x/1"]
+assert queuedl.rank_popular(ranked_in, 10) == \
+    ["https://x/2", "https://x/4", "https://x/1",
+     "https://x/5", "https://x/3"]
+assert queuedl.rank_popular([], 5) == []
+assert queuedl.rank_popular(ranked_in, 0) == []
+print("PASS: (n) rank_popular desc/dedupe-max/None-last/top-N/stable")
+
+# (o) parse_info_counts — multi-line JSON, junk skip, dup max
+info_text = "\n".join([
+    json.dumps({"webpage_url": "https://x/1", "view_count": 42}),
+    "WARNING: koi junk line",
+    json.dumps({"url": "https://x/2", "view_count": 7}),
+    "{tooti hui json line",
+    json.dumps({"webpage_url": "https://x/3"}),
+    json.dumps({"webpage_url": "https://x/1", "view_count": 100}),
+    json.dumps({"webpage_url": "https://x/4", "view_count": "zyada"}),
+])
+assert queuedl.parse_info_counts(info_text) == \
+    {"https://x/1": 100, "https://x/2": 7}
+assert queuedl.parse_info_counts("") == {}
+assert queuedl.parse_info_counts(None) == {}
+print("PASS: (o) parse_info_counts multi-line/junk-skip/dup-max")
+
+# (p) popular_target — bare YT channel -> /videos; baaki as-is
+assert queuedl.popular_target("https://www.youtube.com/@Chan") == \
+    "https://www.youtube.com/@Chan/videos"
+assert queuedl.popular_target("https://www.youtube.com/@Chan/") == \
+    "https://www.youtube.com/@Chan/videos"
+assert queuedl.popular_target("https://www.youtube.com/channel/UCabc") == \
+    "https://www.youtube.com/channel/UCabc/videos"
+assert queuedl.popular_target("https://www.youtube.com/@Chan/shorts") == \
+    "https://www.youtube.com/@Chan/shorts"
+assert queuedl.popular_target("https://www.youtube.com/@Chan/videos") == \
+    "https://www.youtube.com/@Chan/videos"
+assert queuedl.popular_target("https://www.youtube.com/@Chan/streams") == \
+    "https://www.youtube.com/@Chan/streams"
+TT = "https://www.tiktok.com/@someuser"
+assert queuedl.popular_target(TT) == TT
+PL = "https://www.youtube.com/playlist?list=PLxyz"
+assert queuedl.popular_target(PL) == PL
+# pool size: count*4, min 60, max 200
+assert queuedl.popular_pool(10) == 60
+assert queuedl.popular_pool(25) == 100
+assert queuedl.popular_pool(100) == 200
+# command builders
+pcmd = queuedl.build_popular_pool_cmd("https://www.tiktok.com/@u", 120,
+                                      cookies_from_browser="firefox")
+assert pcmd[:3] == [PY, "-m", "yt_dlp"]
+assert "--flat-playlist" in pcmd and "--dump-single-json" in pcmd
+assert pcmd[pcmd.index("--playlist-end") + 1] == "120"
+assert pcmd[pcmd.index("--cookies-from-browser") + 1] == "firefox"
+assert pcmd[-1] == "https://www.tiktok.com/@u"
+icmd = queuedl.build_popular_info_cmd(["https://x/1", "https://x/2"],
+                                      proxy="http://127.0.0.1:8080")
+assert "--dump-json" in icmd and "--no-playlist" in icmd
+assert icmd[icmd.index("--proxy") + 1] == "http://127.0.0.1:8080"
+assert icmd[-2:] == ["https://x/1", "https://x/2"]
+print("PASS: (p) popular_target suffix rule + pool + command builders")
+
+# (q) run_popular (a) — flat entries WITH views -> ranked, step-2 NAHI chalta
+pool_json = json.dumps({"entries": [
+    {"webpage_url": "https://www.tiktok.com/@u/video/1", "view_count": 100},
+    {"webpage_url": "https://www.tiktok.com/@u/video/2", "view_count": 5000},
+    {"webpage_url": "https://www.tiktok.com/@u/video/3", "view_count": 300},
+]})
+events = []
+factory, calls = make_factory([([pool_json + "\n"], 0)])
+urls, ok = queuedl.run_popular(
+    TT, count=2, emit_fn=events.append, popen_factory=factory)
+assert ok is True
+assert urls == ["https://www.tiktok.com/@u/video/2",
+                "https://www.tiktok.com/@u/video/3"]
+assert [e for e in events if e.startswith("GRAB ")] == \
+    [f"GRAB {u}" for u in urls]
+assert any(e.startswith("QLOG Popular: kul 3 videos mili, top 2")
+           for e in events)
+assert events[-1] == "GRABDONE 2"
+assert len(calls) == 1, "step-2 nahi chalna chahiye tha"
+print("PASS: (q) run_popular flat views -> ranked GRAB, step-2 skipped")
+
+# (r) run_popular (b) — flat views NAHI -> step-2 counts se rank
+pool_json2 = json.dumps({"entries": [
+    {"webpage_url": "https://www.tiktok.com/@u/video/1"},
+    {"webpage_url": "https://www.tiktok.com/@u/video/2"},
+    {"webpage_url": "https://www.tiktok.com/@u/video/3"},
+]})
+info_lines = [
+    json.dumps({"webpage_url": "https://www.tiktok.com/@u/video/1",
+                "view_count": 10}) + "\n",
+    json.dumps({"webpage_url": "https://www.tiktok.com/@u/video/2",
+                "view_count": 777}) + "\n",
+    json.dumps({"webpage_url": "https://www.tiktok.com/@u/video/3",
+                "view_count": 55}) + "\n",
+]
+events = []
+factory, calls = make_factory([([pool_json2 + "\n"], 0), (info_lines, 0)])
+urls, ok = queuedl.run_popular(
+    TT, count=2, emit_fn=events.append, popen_factory=factory)
+assert ok is True
+assert urls == ["https://www.tiktok.com/@u/video/2",
+                "https://www.tiktok.com/@u/video/3"]
+assert any("dusri koshish" in e for e in events)
+assert events[-1] == "GRABDONE 2"
+assert len(calls) == 2
+print("PASS: (r) run_popular no flat views -> step-2 counts ranked")
+
+# (s) run_popular (c) — counts kahin bhi nahi -> asal order + warning QLOG
+events = []
+factory, calls = make_factory([
+    ([pool_json2 + "\n"], 0),
+    (["WARNING: kuch nahi mila\n"], 0),
+])
+urls, ok = queuedl.run_popular(
+    TT, count=2, emit_fn=events.append, popen_factory=factory)
+assert ok is True
+assert urls == ["https://www.tiktok.com/@u/video/1",
+                "https://www.tiktok.com/@u/video/2"]
+assert any(e.startswith("QLOG Views ka data nahi mila") for e in events)
+assert events[-1] == "GRABDONE 2"
+assert len(calls) == 2
+print("PASS: (s) run_popular no counts anywhere -> original-order fallback")
+
+# (t) run_popular (d) — step-1 failure -> GRABDONE 0, ok False
+events = []
+factory, calls = make_factory([(["ERROR: account nahi mila\n"], 1)])
+urls, ok = queuedl.run_popular(
+    TT, count=5, emit_fn=events.append, popen_factory=factory)
+assert ok is False and urls == []
+assert events[-1] == "GRABDONE 0"
+assert not any(e.startswith("GRAB ") for e in events)
+assert len(calls) == 1
+print("PASS: (t) run_popular step-1 failure -> GRABDONE 0")
+
 print("ALL LOGIC TESTS PASS")

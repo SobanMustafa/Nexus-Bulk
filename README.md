@@ -101,7 +101,11 @@ wale flow jaisa, engine apna `queuedl.py` hai:
    Grab** (Count: 10/25/50/100, default 50) — channel ke links
    seedha queue mein aa jayenge, phir DOWNLOAD ALL. Facebook
    page/profile ka link bhi de sakte ho (wahan URL jaisa hai
-   waisa hi use hota hai).
+   waisa hi use hota hai). **Popular Grab:** TikTok account ya
+   channel ka link do → tool pehle bari list utha ke har video
+   ke **views gin ke sab se popular top-N** queue mein daal
+   deta hai (Count wali hi tadaad); views ka data na mile to
+   pehli N videos asal order mein aa jati hain.
 5. **Cookies:** TikTok / Instagram ki **login wali ya block
    honay wali** videos ke liye Cookies dropdown se apna browser
    (Chrome / Edge / Firefox) chuno — tool us browser ke cookies

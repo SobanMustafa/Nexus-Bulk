@@ -293,4 +293,23 @@ for a in ("check", "download_only", "pipeline_test1", "pipeline",
     assert "--threads" not in cmd, f"{a} ko threads lag gaye: {cmd}"
 print("PASS: (s) update_ytdlp + cookies/threads/proxy queue/grab only")
 
+# (t) grab_popular — popular type, count, cookies/proxy; khaali URL -> error
+TT = "https://www.tiktok.com/@someuser"
+assert app.build_command("grab_popular", grab_url=TT) == [
+    PY, "queuedl.py", "--grab", TT, "--grab-type", "popular", "--count", "50"]
+assert app.build_command("grab_popular", grab_url=TT, grab_count="10") == [
+    PY, "queuedl.py", "--grab", TT, "--grab-type", "popular", "--count", "10"]
+gcmd = app.build_command("grab_popular", grab_url=TT,
+                         cookies=("chrome", ""), proxy="http://127.0.0.1:8080")
+assert gcmd[gcmd.index("--cookies-from-browser") + 1] == "chrome"
+assert gcmd[gcmd.index("--proxy") + 1] == "http://127.0.0.1:8080"
+gcmd = app.build_command("grab_popular", grab_url=TT,
+                         cookies=("file", "C:/cookies.txt"))
+assert gcmd[gcmd.index("--cookies-file") + 1] == "C:/cookies.txt"
+expect_value_error(lambda: app.build_command("grab_popular", grab_url=""),
+                   "grab_popular khaali url")
+expect_value_error(lambda: app.build_command("grab_popular", grab_url="  "),
+                   "grab_popular whitespace url")
+print("PASS: (t) grab_popular command shape + cookies/proxy + validation")
+
 print("ALL LOGIC TESTS PASS")

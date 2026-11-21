@@ -32,9 +32,10 @@ Sections / buttons aur un ke terminal commands:
       Links box + [Links Download Karo (Paste Wale)]
                                -> links QUEUE list mein add, phir DOWNLOAD ALL
       Queue Me Add Karo        -> sirf queue mein add (download abhi nahi)
-      Shorts Grab / Videos Grab
-                               -> python queuedl.py --grab <channel> --grab-type shorts|videos --count N
-                                  (GRAB lines seedha queue mein jati hain)
+      Shorts Grab / Videos Grab / Popular Grab
+                               -> python queuedl.py --grab <channel> --grab-type shorts|videos|popular --count N
+                                  (GRAB lines seedha queue mein jati hain;
+                                   popular = sab se zyada views wali top-N)
       DOWNLOAD ALL             -> queue ki Pending/Failed rows gui_queue.txt mein,
                                   python queuedl.py gui_queue.txt --quality Q --threads T [--downloads F] [cookies/proxy]
       Retry Failed / Remove Selected / Clear Finished / Clear All
@@ -336,15 +337,17 @@ def build_command(action, limit="", target="", privacy="private", quality="2160"
         cmd += _proxy_args(proxy)
         return cmd
 
-    if action in ("grab_shorts", "grab_videos"):
+    if action in ("grab_shorts", "grab_videos", "grab_popular"):
         url = (grab_url or "").strip()
         if not url:
             raise ValueError(
                 "Channel / Profile link khaali hai — pehle upar wale "
                 "field mein channel ka link likho."
             )
+        grab_type = {"grab_shorts": "shorts", "grab_videos": "videos",
+                     "grab_popular": "popular"}[action]
         cmd = [py, "queuedl.py", "--grab", url,
-               "--grab-type", "shorts" if action == "grab_shorts" else "videos",
+               "--grab-type", grab_type,
                "--count", _parse_grab_count(grab_count)]
         cmd += _cookie_args(cookies)
         cmd += _proxy_args(proxy)
@@ -372,7 +375,8 @@ def build_command(action, limit="", target="", privacy="private", quality="2160"
     raise ValueError(
         f"Unknown action: {action!r} — sahi actions: check, download_only, "
         f"pipeline_test1, pipeline, multi_check, multi_upload, "
-        f"queue_download, grab_shorts, grab_videos, update_ytdlp"
+        f"queue_download, grab_shorts, grab_videos, grab_popular, "
+        f"update_ytdlp"
     )
 
 
@@ -713,11 +717,15 @@ def _build_gui(tk, scrolledtext):
     b_grab_s.pack(side="left", padx=(0, 6))
     b_grab_v = secondary_btn(grow2, "Videos Grab",
                              lambda: on_grab("videos"))
-    b_grab_v.pack(side="left", padx=(0, 18))
+    b_grab_v.pack(side="left", padx=(0, 6))
+    b_grab_p = secondary_btn(grow2, "Popular Grab",
+                             lambda: on_grab("popular"))
+    b_grab_p.pack(side="left", padx=(0, 18))
     field_label(grow2, "Count:").pack(side="left")
     dark_option_menu(grow2, grab_count_var, GRAB_COUNT_CHOICES,
                      width=5).pack(side="left", padx=(6, 0))
-    hint_label(grow2, "channel ke links seedha queue mein aa jayenge"
+    hint_label(grow2, "channel ke links seedha queue me aa jayenge — "
+                      "Popular = sab se zyada views wali"
                ).pack(side="left", padx=(8, 0))
     # 3) QUEUE list — har link aik row: status live update hota hai
     section_heading(card1, "3. QUEUE")
@@ -918,7 +926,8 @@ def _build_gui(tk, scrolledtext):
         if state["running"]:
             return
         state["run_kind"] = "grab"
-        run_action("grab_shorts" if kind == "shorts" else "grab_videos",
+        run_action({"shorts": "grab_shorts", "videos": "grab_videos",
+                    "popular": "grab_popular"}[kind],
                    grab_url=url)
 
     def on_remove_selected():
@@ -1058,7 +1067,8 @@ def _build_gui(tk, scrolledtext):
     b_update = small_btn(btns1, "Update yt-dlp",
                          lambda: run_action("update_ytdlp"))
     b_update.pack(side="left")
-    buttons += [b_paste, b_add_queue, b_grab_s, b_grab_v, b_dl_all,
+    buttons += [b_paste, b_add_queue, b_grab_s, b_grab_v, b_grab_p,
+                b_dl_all,
                 b_retry, b_remove, b_clear_fin, b_clear_all,
                 b_check, b_download, b_test1_small, b_pipeline_small,
                 b_update]

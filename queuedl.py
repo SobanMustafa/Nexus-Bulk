@@ -17,6 +17,9 @@ GUI (app.py) ke naye queue system ka engine. Do kaam:
    YouTube channel pe /shorts ya /videos list uthata hai
    (--grab-type all = dono, pehle videos phir shorts). Doosri
    sites (Facebook page waghera) pe URL jaisa hai waisa use hota hai.
+   --grab-type popular: pehle bari list (pool) uthata hai, har
+   video ke views gin ke SIRF sab se zyada views wali top-N
+   queue mein deta hai (TikTok account ke liye khaas taur pe).
 
 Machine-readable protocol (har line flush hoti hai, GUI yehi parhti hai):
     QLOG <text>                    insaani log line
@@ -39,6 +42,7 @@ Sirf apne / licensed content ke liye.
 import argparse
 import atexit
 import concurrent.futures
+import json
 import os
 import re
 import signal
@@ -221,6 +225,154 @@ def channel_targets(url, grab_type):
     return [base + "/videos"]
 
 
+def popular_target(url):
+    """Popular grab ke liye asal target URL.
+
+    Bare YouTube channel URL (@handle ya /channel/…, baghair
+    /videos|/shorts|/streams suffix ke) -> +"/videos" (wahan
+    saari videos ki list milti hai). Baaki sab — TikTok @account,
+    Facebook page, playlist, pehle se suffixed channel — jaisa
+    hai waisa hi.
+    """
+    u = str(url or "").strip()
+    if "youtube.com" not in u:
+        return u
+    base = u.rstrip("/")
+    if base.endswith(("/videos", "/shorts", "/streams")):
+        return base
+    if "/@" in base or "/channel/" in base:
+        return base + "/videos"
+    return u
+
+
+def popular_pool(count):
+    """Popular grab kitni bari list uthaye (count se bari, taake
+    views ke hisaab se chun sake): count*4, kam az kam 60, zyada
+    se zyada 200."""
+    return min(max(int(count) * 4, 60), 200)
+
+
+def build_popular_pool_cmd(target, pool, cookies_from_browser="",
+                           cookies_file="", proxy=""):
+    """Popular grab step 1: flat-playlist ka single-JSON command
+    (entries ke sath view_count bhi aata hai jahan available ho)."""
+    cmd = [
+        sys.executable, "-m", "yt_dlp",
+        "--flat-playlist",
+        "--dump-single-json",
+        "--playlist-end", str(pool),
+    ]
+    cmd += _cookie_args(cookies_from_browser, cookies_file)
+    if proxy:
+        cmd += ["--proxy", proxy]
+    cmd.append(target)
+    return cmd
+
+
+def build_popular_info_cmd(urls, cookies_from_browser="",
+                           cookies_file="", proxy=""):
+    """Popular grab step 2: chuni hui URLs ka full info (view_count
+    ke liye) — aik hi yt-dlp call, har URL ki aik JSON line."""
+    cmd = [
+        sys.executable, "-m", "yt_dlp",
+        "--dump-json",
+        "--no-playlist",
+    ]
+    cmd += _cookie_args(cookies_from_browser, cookies_file)
+    if proxy:
+        cmd += ["--proxy", proxy]
+    cmd += list(urls)
+    return cmd
+
+
+def _views_or_none(value):
+    """view_count sirf asal number ho to rakho (bool/string nahi)."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return value
+    return None
+
+
+def parse_flat_entries(json_text):
+    """--dump-single-json ka text -> [{"url":…, "views":…|None}].
+
+    Har entry: url = webpage_url ya url (http se shuru hona
+    chahiye, warna entry skip); views = view_count number ho to
+    wo, warna None. Malformed JSON / entries na hon -> [].
+    """
+    try:
+        data = json.loads(json_text or "")
+    except (ValueError, TypeError):
+        return []
+    if not isinstance(data, dict):
+        return []
+    entries = data.get("entries")
+    if not isinstance(entries, list):
+        return []
+    out = []
+    for e in entries:
+        if not isinstance(e, dict):
+            continue
+        url = str(e.get("webpage_url") or e.get("url") or "").strip()
+        if not (url.startswith("http://") or url.startswith("https://")):
+            continue
+        out.append({"url": url, "views": _views_or_none(e.get("view_count"))})
+    return out
+
+
+def rank_popular(entries, count):
+    """Entries ko views ke hisaab se rank karke top-count URLs do.
+
+    Dedupe: aik URL kai dafa aye to SAB SE ZYADA views wala
+    record jeet-ta hai. Sort views desc (None = -1, sab se
+    neeche); barabar views pe pehle aya hua pehle (stable).
+    """
+    best, order = {}, []
+    for e in entries or []:
+        if not isinstance(e, dict):
+            continue
+        url = e.get("url")
+        if not url:
+            continue
+        v = _views_or_none(e.get("views"))
+        key = v if v is not None else -1
+        if url not in best:
+            best[url] = key
+            order.append(url)
+        elif key > best[url]:
+            best[url] = key
+    ranked = sorted(order, key=lambda u: -best[u])
+    return ranked[:max(0, int(count))]
+
+
+def parse_info_counts(text):
+    """--dump-json (multi-URL) ka stdout -> {url: view_count}.
+
+    Har line aik JSON object hoti hai; junk lines skip. URL
+    webpage_url ya url se; view_count number lazmi. Duplicate
+    URL pe sab se zyada views rakho.
+    """
+    counts = {}
+    for raw in str(text or "").splitlines():
+        line = raw.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            data = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(data, dict):
+            continue
+        url = str(data.get("webpage_url") or data.get("url") or "").strip()
+        views = _views_or_none(data.get("view_count"))
+        if not url.startswith("http") or views is None:
+            continue
+        if url not in counts or views > counts[url]:
+            counts[url] = views
+    return counts
+
+
 # ---------------------------------------------------------------------------
 # Runners (popen_factory injectable hai — tests fake laga sakte hain)
 # ---------------------------------------------------------------------------
@@ -322,6 +474,92 @@ def run_grab(url, grab_type="videos", count=50, cookies_from_browser="",
     return collected, True
 
 
+def run_popular(url, count=50, cookies_from_browser="", cookies_file="",
+                proxy="", emit_fn=None, popen_factory=None):
+    """Popular grab: account/channel ki SAB SE ZYADA views wali
+    top-count videos. Returns (urls, ok).
+
+    Step 1: bari flat list (pool) + view_count. Views mil jayein
+    to unhi se rank. Na milen to step 2: pehli 40 videos ka full
+    info le ke views wahan se. Phir bhi na milen to pehli count
+    videos asal order mein (warning QLOG ke sath). Step 1 hi
+    fail/empty ho to GRABDONE 0, ok=False.
+    """
+    emit_fn = emit_fn or emit
+    popen_factory = popen_factory or subprocess.Popen
+    count = max(1, min(500, int(count)))
+    target = popular_target(url)
+
+    def _run_collect(cmd):
+        proc = popen_factory(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, bufsize=1)
+        _register_proc(proc)
+        chunks = []
+        try:
+            for line in proc.stdout:
+                chunks.append(line)
+            rc = proc.wait()
+        finally:
+            _unregister_proc(proc)
+        return "".join(chunks), rc
+
+    # ---- step 1: pool + flat view_count ----
+    pool_cmd = build_popular_pool_cmd(
+        target, popular_pool(count),
+        cookies_from_browser=cookies_from_browser,
+        cookies_file=cookies_file, proxy=proxy)
+    text, rc = _run_collect(pool_cmd)
+    entries = parse_flat_entries(text)
+    if rc != 0 or not entries:
+        emit_fn(f"QLOG Popular grab fail ho gaya: {target} "
+                f"(yt-dlp exit {rc}) — link check karo, ya cookies try karo.")
+        emit_fn("GRABDONE 0")
+        return [], False
+
+    def _emit_ranked(ranked, note):
+        for u in ranked:
+            emit_fn(f"GRAB {u}")
+        emit_fn(note)
+        emit_fn(f"GRABDONE {len(ranked)}")
+        return ranked, True
+
+    if any(e["views"] is not None for e in entries):
+        ranked = rank_popular(entries, count)
+        return _emit_ranked(
+            ranked,
+            f"QLOG Popular: kul {len(entries)} videos mili, "
+            f"top {len(ranked)} views ke hisaab se queue me")
+
+    # ---- step 2: pehli 40 ka full info (view_count ke liye) ----
+    first_urls = []
+    seen = set()
+    for e in entries:
+        if e["url"] not in seen:
+            seen.add(e["url"])
+            first_urls.append(e["url"])
+    info_cmd = build_popular_info_cmd(
+        first_urls[:40],
+        cookies_from_browser=cookies_from_browser,
+        cookies_file=cookies_file, proxy=proxy)
+    info_text, _info_rc = _run_collect(info_cmd)
+    counts = parse_info_counts(info_text)
+    if counts:
+        ranked = rank_popular(
+            [{"url": u, "views": v} for u, v in counts.items()], count)
+        return _emit_ranked(
+            ranked,
+            f"QLOG Popular: views dusri koshish me mile, "
+            f"top {len(ranked)} queue me")
+
+    # ---- fallback: views ka data hi nahi — asal order ----
+    fallback = first_urls[:count]
+    return _emit_ranked(
+        fallback,
+        f"QLOG Views ka data nahi mila — pehli {len(fallback)} "
+        f"videos asal order me queue me")
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -348,8 +586,9 @@ def parse_args(argv=None):
     parser.add_argument("--grab", default="",
                         help="Grab mode: channel/profile ka URL do")
     parser.add_argument("--grab-type", default="videos",
-                        choices=["shorts", "videos", "all"],
-                        help="YouTube channel pe konsi list (default videos)")
+                        choices=["shorts", "videos", "all", "popular"],
+                        help="YouTube channel pe konsi list (default videos); "
+                             "popular = sab se zyada views wali top-N")
     parser.add_argument("--count", type=int, default=50,
                         help="Grab mode: zyada se zyada kitne links (1-500, default 50)")
     return parser.parse_args(argv)
@@ -369,8 +608,11 @@ def main(argv=None):
 
     # ---- grab mode ----
     if args.grab:
-        _, ok = run_grab(args.grab, grab_type=args.grab_type,
-                         count=args.count, **common)
+        if args.grab_type == "popular":
+            _, ok = run_popular(args.grab, count=args.count, **common)
+        else:
+            _, ok = run_grab(args.grab, grab_type=args.grab_type,
+                             count=args.count, **common)
         return 0 if ok else 1
 
     # ---- queue mode ----
