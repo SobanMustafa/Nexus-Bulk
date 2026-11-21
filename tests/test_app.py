@@ -132,4 +132,48 @@ assert app.build_command("check", download_dir="  /tmp/x  ")[-2:] == \
     ["--downloads", "/tmp/x"]
 print("PASS: (i) download_dir -> --downloads (download actions + check), multi exclude, empty exclude")
 
+# (j) extract_links — paste box ka text saaf links me badlo:
+# blanks + # comments skip, non-http lines drop, duplicates aik dafa, order waisa hi
+assert app.extract_links("") == []
+assert app.extract_links("\n\n   \n") == []
+assert app.extract_links(
+    "https://www.youtube.com/watch?v=abc\n"
+    "\n"
+    "# ye comment hai\n"
+    "  https://www.tiktok.com/@user/video/123  \n"
+    "koi aam text line\n"
+    "www.example.com/no-scheme\n"
+    "ftp://example.com/file\n"
+    "https://www.youtube.com/watch?v=abc\n"
+    "http://example.com/plain-http\n"
+) == [
+    "https://www.youtube.com/watch?v=abc",
+    "https://www.tiktok.com/@user/video/123",
+    "http://example.com/plain-http",
+]
+assert app.extract_links(None) == []
+print("PASS: (j) extract_links blanks/comments/duplicates/non-http drop, order preserved")
+
+# (k) urls_file — sirf download wale teeno actions ko --urls pass hoti hai,
+# check/multi ko KABHI nahi, khaali/whitespace = pass nahi hoti
+UF = "paste_links.txt"
+assert app.build_command("download_only", urls_file=UF) == [
+    PY, "pipeline.py", "--download-only", "--quality", "2160", "--urls", UF]
+assert app.build_command("pipeline_test1", urls_file=UF) == [
+    PY, "pipeline.py", "--limit", "1", "--privacy", "private",
+    "--quality", "2160", "--urls", UF]
+assert app.build_command("pipeline", limit="2", urls_file=UF) == [
+    PY, "pipeline.py", "--privacy", "private", "--limit", "2",
+    "--quality", "2160", "--urls", UF]
+assert app.build_command("download_only", download_dir="/tmp/dl", urls_file=UF) == [
+    PY, "pipeline.py", "--download-only", "--quality", "2160",
+    "--downloads", "/tmp/dl", "--urls", UF]
+for a in ("check", "multi_check", "multi_upload"):
+    cmd = app.build_command(a, target="mind-maze-yt", limit="2", urls_file=UF)
+    assert "--urls" not in cmd, f"{a} ko --urls pass ho gaya: {cmd}"
+for a in ("download_only", "pipeline_test1", "pipeline"):
+    assert "--urls" not in app.build_command(a, urls_file="")
+    assert "--urls" not in app.build_command(a, urls_file="   ")
+print("PASS: (k) urls_file -> --urls (3 download actions), check/multi exclude, empty exclude")
+
 print("ALL LOGIC TESTS PASS")

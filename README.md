@@ -23,13 +23,23 @@ neeche **Live Log** mein live nazar aata hai:
 
 | Button | Peeche wala command |
 |---|---|
-| Download Only (Download card) | `python pipeline.py --download-only --quality <quality> --downloads <folder>` |
+| Links Download Karo (Paste Wale) (Download card) | links `paste_links.txt` mein save, phir `python pipeline.py --download-only --quality <quality> --downloads <folder> --urls paste_links.txt` |
+| Download Only (urls.txt wali list) (Download card) | `python pipeline.py --download-only --quality <quality> --downloads <folder>` |
 | Sirf Check (Download card) | `python pipeline.py --check --downloads <folder>` |
 | Pipeline Test — Pehli 1 Video (YouTube card) | `python pipeline.py --limit 1 --privacy <privacy> --quality <quality> --downloads <folder>` |
 | Pipeline — Download + Upload (YouTube card) | `python pipeline.py --privacy <privacy> --quality <quality> --downloads <folder>` |
 | Multi Check (Multi card) | `python multi_upload.py --check` |
 | Multi Upload (Multi card) | `python multi_upload.py` |
 
+- **Video Links box** (Download card) — **SAB SE AASAN tareeqa:**
+  links seedha box mein paste karo (aik line = aik link —
+  YouTube / TikTok / Facebook…) aur **Links Download Karo
+  (Paste Wale)** dabao; `urls.txt` edit karne ki zaroorat nahi.
+  Links `paste_links.txt` mein save ho ke download hoti hain
+  (Quality aur Download Folder upar wale fields se lagte hain,
+  Limit paste pe nahi lagta). Purana tareeqa — `urls.txt` wali
+  list aur **Download Only (urls.txt wali list)** button — bhi
+  mojood hai.
 - **Limit** (optional, Download card): kitni videos — khaali =
   saari. Download Only aur Pipeline pe lagta hai (Pipeline Test
   pe hamesha 1 fix hai).

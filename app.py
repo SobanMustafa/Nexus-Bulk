@@ -28,7 +28,11 @@ Chalana (Windows laptop):
 
 Sections / buttons aur un ke terminal commands:
     DOWNLOAD card:
-      Download Only            -> python pipeline.py --download-only [--limit N] --quality <quality> [--downloads <folder>]
+      Links Download Karo (Paste Wale)
+                               -> links box se paste_links.txt banake
+                                  python pipeline.py --download-only --quality <quality> [--downloads <folder>] --urls paste_links.txt
+      Download Only (urls.txt wali list)
+                               -> python pipeline.py --download-only [--limit N] --quality <quality> [--downloads <folder>]
       Sirf Check               -> python pipeline.py --check [--downloads <folder>]
     UPLOAD — YOUTUBE card:
       Pipeline Test (1 video)  -> python pipeline.py --limit 1 --privacy <privacy> --quality <quality>
@@ -135,8 +139,29 @@ def _parse_quality(quality):
     return q
 
 
+def extract_links(text):
+    """Paste box ka text -> saaf links ki list. Pure function — koi I/O nahi.
+
+    Aik line = aik link: blank lines aur '#' se shuru hone wali
+    lines skip, sirf http:// ya https:// se shuru hone wali lines
+    rakho, duplicates hata ke order waisa hi rakho.
+    """
+    links, seen = [], set()
+    for raw in str(text or "").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if not (line.startswith("http://") or line.startswith("https://")):
+            continue
+        if line in seen:
+            continue
+        seen.add(line)
+        links.append(line)
+    return links
+
+
 def build_command(action, limit="", target="", privacy="private", quality="2160",
-                  download_dir=""):
+                  download_dir="", urls_file=""):
     """Action -> command list. Pure function — koi window, koi subprocess nahi.
 
     Script names app wale folder ke relative hain; GUI in ko
@@ -147,12 +172,18 @@ def build_command(action, limit="", target="", privacy="private", quality="2160"
     hai — check bhi usi folder ko scan karke uploads.csv banata hai.
     Khaali/whitespace ho to pass NAHI hota (pipeline ka apna default
     downloads/ lagta hai). Multi actions ko kabhi pass nahi hota.
+
+    urls_file: sirf download wale actions (download_only,
+    pipeline_test1, pipeline) ko --urls se pass hota hai — paste
+    wale links ke liye GUI paste_links.txt bana ke ye deta hai.
+    Check / multi ko kabhi pass nahi hota.
     """
     py = sys.executable
     lim = _parse_limit(limit)
     tgt = (target or "").strip()
     q = _parse_quality(quality)
     dl = (download_dir or "").strip()
+    uf = (urls_file or "").strip()
 
     if action == "check":
         cmd = [py, "pipeline.py", "--check"]
@@ -167,6 +198,8 @@ def build_command(action, limit="", target="", privacy="private", quality="2160"
         cmd += ["--quality", q]
         if dl:
             cmd += ["--downloads", dl]
+        if uf:
+            cmd += ["--urls", uf]
         return cmd
 
     if action == "pipeline_test1":
@@ -174,6 +207,8 @@ def build_command(action, limit="", target="", privacy="private", quality="2160"
                "--privacy", _parse_privacy(privacy), "--quality", q]
         if dl:
             cmd += ["--downloads", dl]
+        if uf:
+            cmd += ["--urls", uf]
         return cmd
 
     if action == "pipeline":
@@ -183,6 +218,8 @@ def build_command(action, limit="", target="", privacy="private", quality="2160"
         cmd += ["--quality", q]
         if dl:
             cmd += ["--downloads", dl]
+        if uf:
+            cmd += ["--urls", uf]
         return cmd
 
     if action == "multi_check":
@@ -259,8 +296,8 @@ def _build_gui(tk, scrolledtext):
 
     root = tk.Tk()
     root.title("Bulk Tool")
-    root.geometry("900x720")
-    root.minsize(820, 660)
+    root.geometry("900x800")
+    root.minsize(820, 740)
     root.configure(bg=COL_BG)
 
     # ttk styles — clam theme pe progress bar / combobox ke rang lagte hain
@@ -381,6 +418,31 @@ def _build_gui(tk, scrolledtext):
     quality_var = tk.StringVar(value="2160")
     limit_var = tk.StringVar()
     card1 = make_card("DOWNLOAD", COL_GREEN)
+    # Paste links box — SAB SE AASAN tareeqa: urls.txt edit karne ki
+    # zaroorat nahi, links seedha yahan paste karo.
+    tk.Label(card1,
+             text="Video Links — yahan paste karo "
+                  "(aik line = aik link: YouTube / TikTok / Facebook…)",
+             font=FONT_UI, bg=COL_CARD, fg=COL_TEXT).pack(
+        anchor="w", pady=(0, 4))
+    links_frame = tk.Frame(card1, bg=COL_CARD)
+    links_frame.pack(fill="x", pady=(0, 8))
+    links_text = tk.Text(
+        links_frame, height=4, bg=COL_INPUT, fg=COL_TEXT,
+        insertbackground=COL_TEXT, relief="flat", font=("Segoe UI", 10),
+        highlightthickness=1, highlightbackground=COL_BORDER,
+        highlightcolor=COL_ACCENT, wrap="word")
+    links_scroll = tk.Scrollbar(links_frame, orient="vertical",
+                                command=links_text.yview)
+    links_text.config(yscrollcommand=links_scroll.set)
+    links_scroll.pack(side="right", fill="y")
+    links_text.pack(side="left", fill="x", expand=True)
+    btns0 = tk.Frame(card1, bg=COL_CARD)
+    btns0.pack(fill="x", pady=(0, 10))
+    b_paste = primary_btn(btns0, "Links Download Karo (Paste Wale)",
+                          COL_GREEN, COL_GREEN_ACTIVE,
+                          lambda: run_paste_download())
+    b_paste.pack(fill="x")
     row1 = tk.Frame(card1, bg=COL_CARD)
     row1.pack(fill="x", pady=(0, 8))
     field_label(row1, "Quality:").pack(side="left")
@@ -414,14 +476,14 @@ def _build_gui(tk, scrolledtext):
     small_btn(row1b, "Reset", reset_folder).pack(side="left")
     btns1 = tk.Frame(card1, bg=COL_CARD)
     btns1.pack(fill="x")
-    b_download = primary_btn(btns1, "Download Only", COL_GREEN,
-                             COL_GREEN_ACTIVE,
+    b_download = primary_btn(btns1, "Download Only (urls.txt wali list)",
+                             COL_GREEN, COL_GREEN_ACTIVE,
                              lambda: run_action("download_only"))
     b_download.pack(side="left", fill="x", expand=True, padx=(0, 6))
     b_check = secondary_btn(btns1, "Sirf Check",
                             lambda: run_action("check"))
     b_check.pack(side="left")
-    buttons += [b_download, b_check]
+    buttons += [b_paste, b_download, b_check]
 
     # ---------- card 2: UPLOAD — YOUTUBE ----------
     privacy_var = tk.StringVar(value="private")
@@ -567,17 +629,43 @@ def _build_gui(tk, scrolledtext):
             pass
         root.after(100, poll_queue)
 
-    def run_action(action):
+    def run_paste_download():
+        """Paste box ke links -> paste_links.txt -> download_only run.
+
+        Limit pass NAHI hota — user ne bilkul wahi links paste kiye
+        hain jo usay chahiye hain. Quality aur Download Folder
+        maujooda fields se lagte hain.
+        """
+        if state["running"]:
+            return
+        links = extract_links(links_text.get("1.0", "end"))
+        if not links:
+            write_log("\nPehle box me kam az kam aik link paste karo.\n")
+            set_status("● Error", COL_RED)
+            return
+        paste_path = os.path.join(BASE_DIR, "paste_links.txt")
+        try:
+            with open(paste_path, "w", encoding="utf-8") as f:
+                f.write("\n".join(links) + "\n")
+        except OSError as e:
+            write_log(f"\nERROR: paste_links.txt likh nahi saka — {e}\n")
+            set_status("● Error", COL_RED)
+            return
+        write_log(f"\nPaste links: {len(links)} link(s) — download shuru…\n")
+        run_action("download_only", urls_file=paste_path, use_limit=False)
+
+    def run_action(action, urls_file="", use_limit=True):
         if state["running"]:
             return
         try:
             cmd = build_command(
                 action,
-                limit=limit_var.get(),
+                limit=limit_var.get() if use_limit else "",
                 target=target_var.get(),
                 privacy=privacy_var.get(),
                 quality=quality_var.get(),
                 download_dir=download_dir_var.get(),
+                urls_file=urls_file,
             )
         except ValueError as e:
             write_log(f"\nERROR: {e}\n")
