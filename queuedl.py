@@ -162,6 +162,15 @@ def _cookie_args(cookies_from_browser="", cookies_file=""):
     return []
 
 
+def _impersonate_args():
+    """Browser TLS impersonation via curl-cffi agar available ho.
+    TikTok account/profile grab ke liye lazmi hai taake Akamai anti-bot block na kare."""
+    import importlib.util
+    if importlib.util.find_spec("curl_cffi") is not None:
+        return ["--impersonate", "chrome"]
+    return []
+
+
 def build_download_cmd(url, quality=DEFAULT_QUALITY, downloads_dir=DEFAULT_DOWNLOADS,
                        archive=DEFAULT_ARCHIVE, cookies_from_browser="",
                        cookies_file="", proxy=""):
@@ -182,6 +191,7 @@ def build_download_cmd(url, quality=DEFAULT_QUALITY, downloads_dir=DEFAULT_DOWNL
         "--windows-filenames",
         "--no-warnings",
     ]
+    cmd += _impersonate_args()
     cmd += _cookie_args(cookies_from_browser, cookies_file)
     if proxy:
         cmd += ["--proxy", proxy]
@@ -198,6 +208,7 @@ def build_grab_cmd(target, count=50, cookies_from_browser="",
         "--print", "url",
         "--playlist-end", str(count),
     ]
+    cmd += _impersonate_args()
     cmd += _cookie_args(cookies_from_browser, cookies_file)
     if proxy:
         cmd += ["--proxy", proxy]
@@ -262,6 +273,7 @@ def build_popular_pool_cmd(target, pool, cookies_from_browser="",
         "--dump-single-json",
         "--playlist-end", str(pool),
     ]
+    cmd += _impersonate_args()
     cmd += _cookie_args(cookies_from_browser, cookies_file)
     if proxy:
         cmd += ["--proxy", proxy]
@@ -278,6 +290,7 @@ def build_popular_info_cmd(urls, cookies_from_browser="",
         "--dump-json",
         "--no-playlist",
     ]
+    cmd += _impersonate_args()
     cmd += _cookie_args(cookies_from_browser, cookies_file)
     if proxy:
         cmd += ["--proxy", proxy]
@@ -445,6 +458,7 @@ def run_grab(url, grab_type="videos", count=50, cookies_from_browser="",
     popen_factory = popen_factory or subprocess.Popen
     count = max(1, min(500, int(count)))
     collected, seen = [], set()
+    errors = []
     for target in channel_targets(url, grab_type):
         cmd = build_grab_cmd(
             target, count=count,
@@ -460,10 +474,16 @@ def run_grab(url, grab_type="videos", count=50, cookies_from_browser="",
                 if s.startswith("http") and s not in seen:
                     seen.add(s)
                     collected.append(s)
+                elif "ERROR:" in s or "Could not copy" in s:
+                    errors.append(s)
             rc = proc.wait()
         finally:
             _unregister_proc(proc)
         if rc != 0:
+            for err in errors[-3:]:
+                emit_fn(f"QLOG yt-dlp: {err}")
+            if any("Could not copy" in e and "cookie" in e for e in errors):
+                emit_fn("QLOG Tip: Browser (Chrome/Edge) khula hua hai — browser band karo ya Cookies dropdown ko 'None' pe rakho.")
             emit_fn(f"QLOG Grab fail ho gaya: {target} "
                     f"(yt-dlp exit {rc}) — link check karo, ya cookies try karo.")
             emit_fn("GRABDONE 0")
@@ -496,22 +516,30 @@ def run_popular(url, count=50, cookies_from_browser="", cookies_file="",
             text=True, bufsize=1, encoding="utf-8", errors="replace")
         _register_proc(proc)
         chunks = []
+        errors = []
         try:
             for line in proc.stdout:
                 chunks.append(line)
+                s = line.strip()
+                if "ERROR:" in s or "Could not copy" in s:
+                    errors.append(s)
             rc = proc.wait()
         finally:
             _unregister_proc(proc)
-        return "".join(chunks), rc
+        return "".join(chunks), rc, errors
 
     # ---- step 1: pool + flat view_count ----
     pool_cmd = build_popular_pool_cmd(
         target, popular_pool(count),
         cookies_from_browser=cookies_from_browser,
         cookies_file=cookies_file, proxy=proxy)
-    text, rc = _run_collect(pool_cmd)
+    text, rc, errors = _run_collect(pool_cmd)
     entries = parse_flat_entries(text)
     if rc != 0 or not entries:
+        for err in errors[-3:]:
+            emit_fn(f"QLOG yt-dlp: {err}")
+        if any("Could not copy" in e and "cookie" in e for e in errors):
+            emit_fn("QLOG Tip: Browser (Chrome/Edge) khula hua hai — browser band karo ya Cookies dropdown ko 'None' pe rakho.")
         emit_fn(f"QLOG Popular grab fail ho gaya: {target} "
                 f"(yt-dlp exit {rc}) — link check karo, ya cookies try karo.")
         emit_fn("GRABDONE 0")
@@ -542,7 +570,7 @@ def run_popular(url, count=50, cookies_from_browser="", cookies_file="",
         first_urls[:40],
         cookies_from_browser=cookies_from_browser,
         cookies_file=cookies_file, proxy=proxy)
-    info_text, _info_rc = _run_collect(info_cmd)
+    info_text, _info_rc, _info_errors = _run_collect(info_cmd)
     counts = parse_info_counts(info_text)
     if counts:
         ranked = rank_popular(

@@ -324,6 +324,7 @@ python tests/test_uploader.py    # uploader logic — ALL LOGIC TESTS PASS
 python tests/test_pipeline.py    # pipeline logic — ALL LOGIC TESTS PASS
 python tests/test_multi.py       # multi + FB logic — ALL LOGIC TESTS PASS
 python tests/test_app.py         # GUI command logic — ALL LOGIC TESTS PASS
+python tests/test_queuedl.py     # queue engine & grab logic — ALL LOGIC TESTS PASS
 ```
 Saari suites no-network / no-login hain. Downloader ka asal smoke
 test Step 2 wala `--dry-run` hai, jo network mangta hai (uska
