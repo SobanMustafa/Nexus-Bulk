@@ -1,0 +1,7 @@
+file,title,description,tags,category_id,privacy,target
+# COPY KARO: copy uploads.example.csv uploads.csv — phir neeche wali # rows me se aik uncomment karo aur file ka naam apni asal video se badlo.
+# --check ko uploads.csv chahiye hoti hai — baghair queue ke --check FAIL hoga ("uploads.csv nahi mili"), is liye ye step --check se PEHLE karo.
+# Aik hi video do targets pe: us file ki do rows banao, sirf target alag (neeche maze-day1 wali do rows dekho).
+# videos/maze-day1.mp4,Mind Maze Day 1 | Can you reverse it?,Your eyes lie to you. Stare and reverse it with your mind.,illusion|mindmaze|shorts,22,private,mind-maze-yt
+# videos/maze-day1.mp4,Mind Maze Day 1 | Can you reverse it?,Your eyes lie to you. Stare and reverse it with your mind.,illusion|mindmaze|shorts,22,private,mind-maze-fb
+# videos/horror-night1.mp4,100 Nights of Fear — Night 1 | Three Doors,Three doors. One choice. Would YOU step out?,horror|scary|shorts,24,private,horror-fb
