@@ -397,7 +397,7 @@ def run_one(index, url, quality=DEFAULT_QUALITY, downloads_dir=DEFAULT_DOWNLOADS
             cookies_file=cookies_file, proxy=proxy)
         proc = popen_factory(
             cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            text=True, bufsize=1)
+            text=True, bufsize=1, encoding="utf-8", errors="replace")
         _register_proc(proc)
         skipped = False
         reported = -1  # is attempt mein aakhri report shuda pct
@@ -452,7 +452,7 @@ def run_grab(url, grab_type="videos", count=50, cookies_from_browser="",
             cookies_file=cookies_file, proxy=proxy)
         proc = popen_factory(
             cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            text=True, bufsize=1)
+            text=True, bufsize=1, encoding="utf-8", errors="replace")
         _register_proc(proc)
         try:
             for line in proc.stdout:
@@ -493,7 +493,7 @@ def run_popular(url, count=50, cookies_from_browser="", cookies_file="",
     def _run_collect(cmd):
         proc = popen_factory(
             cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            text=True, bufsize=1)
+            text=True, bufsize=1, encoding="utf-8", errors="replace")
         _register_proc(proc)
         chunks = []
         try:

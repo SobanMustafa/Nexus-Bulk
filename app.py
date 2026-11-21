@@ -1379,6 +1379,8 @@ def _build_gui(tk, scrolledtext):
             stderr=subprocess.STDOUT,
             text=True,
             bufsize=1,
+            encoding="utf-8",
+            errors="replace",
         )
         # Windows pe alag console window na khule (doosre OS pe ye flag
         # hota hi nahi, is liye getattr se guard).
