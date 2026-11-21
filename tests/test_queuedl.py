@@ -84,6 +84,13 @@ cmd3 = queuedl.build_download_cmd(
     "https://youtu.be/xyz", cookies_file="/tmp/cookies.txt")
 assert cmd3[cmd3.index("--cookies") + 1] == "/tmp/cookies.txt"
 print("PASS: (e) build_download_cmd archive/format/cookies/proxy")
+# (e2) SkillNova wali folder tartib — platform/channel subfolders + info.json
+assert queuedl.OUTPUT_TEMPLATE == \
+    "%(extractor)s/%(uploader)s/%(title)s [%(id)s].%(ext)s"
+assert "-o" in cmd and cmd[cmd.index("-o") + 1] == queuedl.OUTPUT_TEMPLATE
+assert "--write-info-json" in cmd
+assert "--windows-filenames" in cmd
+print("PASS: (e2) build_download_cmd platform/channel folders + write-info-json")
 
 # (f) build_grab_cmd
 gcmd = queuedl.build_grab_cmd("https://www.youtube.com/@C/videos", count=25)

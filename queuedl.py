@@ -53,6 +53,15 @@ QUALITY_CHOICES = [720, 1080, 1440, 2160]
 DEFAULT_QUALITY = 2160
 DEFAULT_THREADS = 4
 MAX_ATTEMPTS = 2  # har URL: pehli koshish + aik retry
+# SkillNova wali folder tartib (transcript [06:18-06:51]: pehle platform ka
+# folder, phir us ke andar channel/page ke naam ka folder):
+#   downloads/youtube/<channel>/Title [id].mp4
+#   downloads/TikTok/<account>/Title [id].mp4
+# %(extractor)s = youtube / TikTok / Facebook / Instagram waghera,
+# %(uploader)s = channel ya page ka naam. --windows-filenames naam ko
+# Windows-safe rakhta hai. --write-info-json se pipeline --check in
+# downloads ko bhi upload queue mein le sakta hai.
+OUTPUT_TEMPLATE = "%(extractor)s/%(uploader)s/%(title)s [%(id)s].%(ext)s"
 
 _emit_lock = threading.Lock()
 
@@ -164,6 +173,9 @@ def build_download_cmd(url, quality=DEFAULT_QUALITY, downloads_dir=DEFAULT_DOWNL
         "--concurrent-fragments", "3",
         "--download-archive", archive,
         "-P", downloads_dir,
+        "-o", OUTPUT_TEMPLATE,
+        "--write-info-json",
+        "--windows-filenames",
         "--no-warnings",
     ]
     cmd += _cookie_args(cookies_from_browser, cookies_file)

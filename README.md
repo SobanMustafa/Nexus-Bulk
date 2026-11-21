@@ -116,6 +116,14 @@ wale flow jaisa, engine apna `queuedl.py` hai:
    (aksar yt-dlp purana honay pe hota hai) to Pipeline wali row
    mein **Update yt-dlp** dabao — naya version install ho
    jayega, phir dobara try karo.
+8. **Folder tartib (SkillNova jaisi):** downloads flat nahi
+   girte — har video apne **platform + channel** ke folder mein
+   jati hai, jaise `downloads/youtube/MindMaze/…mp4`,
+   `downloads/TikTok/someuser/…mp4`. Queue downloads ke sath
+   `.info.json` bhi save hoti hai, is liye Pipeline → Check /
+   upload in nested folders wali videos ko bhi dhoond leta hai.
+   Purani flat downloads waisi ki waisi chalengi — un ke liye
+   kuch badalna nahi.
 
 Terminal se queue mode akela bhi chalta hai:
 ```
