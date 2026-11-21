@@ -1,0 +1,412 @@
+#!/usr/bin/env python3
+"""
+Queue Downloader + Channel Grabber — SkillNova style (personal use only)
+=========================================================================
+GUI (app.py) ke naye queue system ka engine. Do kaam:
+
+1. QUEUE MODE — aik queue file se saari videos PARALLEL download:
+       python queuedl.py gui_queue.txt --quality 2160 --threads 4 \
+           --downloads <folder> --archive download_archive.txt
+   Har video ka apna `python -m yt_dlp` subprocess chalta hai
+   (yt-dlp import NAHI hota — is liye ye script baghair yt-dlp ke
+   bhi start ho jati hai aur saaf error deti hai).
+
+2. GRAB MODE — channel/profile se video links nikaal ke stdout pe:
+       python queuedl.py --grab https://www.youtube.com/@channel \
+           --grab-type shorts --count 50
+   YouTube channel pe /shorts ya /videos list uthata hai
+   (--grab-type all = dono, pehle videos phir shorts). Doosri
+   sites (Facebook page waghera) pe URL jaisa hai waisa use hota hai.
+
+Machine-readable protocol (har line flush hoti hai, GUI yehi parhti hai):
+    QLOG <text>                    insaani log line
+    QITEM <i> START 0              item i shuru
+    QITEM <i> PROGRESS <pct>       progress (har >=5% change ya 100 pe)
+    QITEM <i> DONE 100             ho gaya
+    QITEM <i> SKIPPED 100          archive mein pehle se tha
+    QITEM <i> FAILED <last pct>    2 koshishon ke baad bhi fail
+    QDONE total=N done=N failed=N skipped=N
+    GRAB <url>                     grab mode: aik link mila
+    GRABDONE <count>               grab khatam
+
+Cookies / proxy (login wali ya mushkil sites ke liye):
+    --cookies-from-browser chrome|edge|firefox
+    --cookies-file cookies.txt
+    --proxy http://host:port
+
+Sirf apne / licensed content ke liye.
+"""
+import argparse
+import atexit
+import concurrent.futures
+import os
+import re
+import signal
+import subprocess
+import sys
+import threading
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DEFAULT_DOWNLOADS = os.path.join(BASE_DIR, "downloads")
+DEFAULT_ARCHIVE = os.path.join(BASE_DIR, "download_archive.txt")
+QUALITY_CHOICES = [720, 1080, 1440, 2160]
+DEFAULT_QUALITY = 2160
+DEFAULT_THREADS = 4
+MAX_ATTEMPTS = 2  # har URL: pehli koshish + aik retry
+
+_emit_lock = threading.Lock()
+
+
+def emit(line):
+    """Protocol line stdout pe — thread-safe + flush."""
+    with _emit_lock:
+        print(line, flush=True)
+
+
+# ---------------------------------------------------------------------------
+# Child process registry — parent band ho to bachay bhi band
+# ---------------------------------------------------------------------------
+_active_procs = set()
+_procs_lock = threading.Lock()
+
+
+def _register_proc(proc):
+    with _procs_lock:
+        _active_procs.add(proc)
+
+
+def _unregister_proc(proc):
+    with _procs_lock:
+        _active_procs.discard(proc)
+
+
+def _terminate_all():
+    with _procs_lock:
+        procs = list(_active_procs)
+    for p in procs:
+        try:
+            p.terminate()
+        except Exception:  # noqa: BLE001 — band karna hi maqsad hai
+            pass
+
+
+atexit.register(_terminate_all)
+
+
+def _on_signal(signum, frame):  # noqa: ARG001 — signal signature
+    _terminate_all()
+    sys.exit(128 + signum if signum else 1)
+
+
+# ---------------------------------------------------------------------------
+# Pure helpers (tests inhi ko check karte hain — koi network/subprocess nahi)
+# ---------------------------------------------------------------------------
+def build_format(max_height):
+    """yt-dlp format string — downloader.py wali hi semantics:
+    max_height tak ki best video + best audio, warna best."""
+    return f"bestvideo[height<={max_height}]+bestaudio/best[height<={max_height}]/best"
+
+
+_PROGRESS_RE = re.compile(r"(\d+(?:\.\d+)?)\s*%")
+
+
+def parse_progress_line(line):
+    """yt-dlp ki '[download] …%' line se percent (float) — warna None."""
+    if not line:
+        return None
+    m = _PROGRESS_RE.search(str(line))
+    if m is None:
+        return None
+    try:
+        pct = float(m.group(1))
+    except ValueError:
+        return None
+    return max(0.0, min(100.0, pct))
+
+
+def load_queue_text(text):
+    """Queue file ka text -> saaf URLs (app.extract_links wali semantics):
+    blank + '#' lines skip, sirf http(s) lines, duplicates hata ke order waisa hi."""
+    urls, seen = [], set()
+    for raw in str(text or "").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if not (line.startswith("http://") or line.startswith("https://")):
+            continue
+        if line in seen:
+            continue
+        seen.add(line)
+        urls.append(line)
+    return urls
+
+
+def _cookie_args(cookies_from_browser="", cookies_file=""):
+    if cookies_from_browser:
+        return ["--cookies-from-browser", cookies_from_browser]
+    if cookies_file:
+        return ["--cookies", cookies_file]
+    return []
+
+
+def build_download_cmd(url, quality=DEFAULT_QUALITY, downloads_dir=DEFAULT_DOWNLOADS,
+                       archive=DEFAULT_ARCHIVE, cookies_from_browser="",
+                       cookies_file="", proxy=""):
+    """Aik URL ke liye poora yt-dlp command (subprocess list)."""
+    cmd = [
+        sys.executable, "-m", "yt_dlp",
+        "--newline",
+        "--no-playlist",
+        "-f", build_format(quality),
+        "--merge-output-format", "mp4",
+        "--retries", "3",
+        "--fragment-retries", "3",
+        "--concurrent-fragments", "3",
+        "--download-archive", archive,
+        "-P", downloads_dir,
+        "--no-warnings",
+    ]
+    cmd += _cookie_args(cookies_from_browser, cookies_file)
+    if proxy:
+        cmd += ["--proxy", proxy]
+    cmd.append(url)
+    return cmd
+
+
+def build_grab_cmd(target, count=50, cookies_from_browser="",
+                   cookies_file="", proxy=""):
+    """Channel/profile list nikaalne ka flat-playlist command."""
+    cmd = [
+        sys.executable, "-m", "yt_dlp",
+        "--flat-playlist",
+        "--print", "url",
+        "--playlist-end", str(count),
+    ]
+    cmd += _cookie_args(cookies_from_browser, cookies_file)
+    if proxy:
+        cmd += ["--proxy", proxy]
+    cmd.append(target)
+    return cmd
+
+
+def channel_targets(url, grab_type):
+    """Channel URL + type -> asal target URL(s) ki list.
+
+    YouTube: base + /shorts ya /videos (URL pehle se suffixed ho to
+    waisa hi). type 'all' -> [videos, shorts] (videos pehle).
+    YouTube ke ilawa (Facebook waghera): URL jaisa hai waisa hi.
+    """
+    u = str(url or "").strip()
+    if "youtube.com" not in u:
+        return [u]
+    base = u.rstrip("/")
+    if base.endswith("/shorts") or base.endswith("/videos"):
+        return [base]
+    if grab_type == "shorts":
+        return [base + "/shorts"]
+    if grab_type == "all":
+        return [base + "/videos", base + "/shorts"]
+    return [base + "/videos"]
+
+
+# ---------------------------------------------------------------------------
+# Runners (popen_factory injectable hai — tests fake laga sakte hain)
+# ---------------------------------------------------------------------------
+def run_one(index, url, quality=DEFAULT_QUALITY, downloads_dir=DEFAULT_DOWNLOADS,
+            archive=DEFAULT_ARCHIVE, cookies_from_browser="", cookies_file="",
+            proxy="", emit_fn=None, popen_factory=None, on_missing=None):
+    """Aik URL download karo (2 attempts tak). Returns (status, missing_module).
+
+    status: "DONE" / "FAILED" / "SKIPPED". Protocol lines emit_fn se
+    jati hain (default: module wali emit). popen_factory default
+    subprocess.Popen hai — tests fake de sakte hain.
+    """
+    emit_fn = emit_fn or emit
+    popen_factory = popen_factory or subprocess.Popen
+    emit_fn(f"QITEM {index} START 0")
+    missing = False
+    last_pct = 0
+    for attempt in range(MAX_ATTEMPTS):
+        cmd = build_download_cmd(
+            url, quality=quality, downloads_dir=downloads_dir, archive=archive,
+            cookies_from_browser=cookies_from_browser,
+            cookies_file=cookies_file, proxy=proxy)
+        proc = popen_factory(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, bufsize=1)
+        _register_proc(proc)
+        skipped = False
+        reported = -1  # is attempt mein aakhri report shuda pct
+        attempt_pct = 0
+        try:
+            for line in proc.stdout:
+                if "has already been recorded in the archive" in line:
+                    skipped = True
+                if "No module named yt_dlp" in line:
+                    missing = True
+                    if on_missing is not None:
+                        on_missing()
+                pct = parse_progress_line(line)
+                if pct is not None:
+                    attempt_pct = max(attempt_pct, int(pct))
+                    ipct = int(pct)
+                    if ipct - reported >= 5 or (ipct == 100 and ipct != reported):
+                        emit_fn(f"QITEM {index} PROGRESS {ipct}")
+                        reported = ipct
+            rc = proc.wait()
+        finally:
+            _unregister_proc(proc)
+        last_pct = attempt_pct
+        if skipped:
+            emit_fn(f"QITEM {index} SKIPPED 100")
+            return "SKIPPED", missing
+        if rc == 0:
+            emit_fn(f"QITEM {index} DONE 100")
+            return "DONE", missing
+        if attempt + 1 < MAX_ATTEMPTS:
+            emit_fn(f"QLOG Item {index + 1}: pehli koshish fail — "
+                    f"dobara try kar raha hoon ({url})")
+    emit_fn(f"QITEM {index} FAILED {last_pct}")
+    return "FAILED", missing
+
+
+def run_grab(url, grab_type="videos", count=50, cookies_from_browser="",
+             cookies_file="", proxy="", emit_fn=None, popen_factory=None):
+    """Channel/profile se links nikaalo. Returns (urls, ok).
+
+    Saare targets kamyab hon tab hi GRAB lines emit hoti hain —
+    koi target fail ho to GRABDONE 0 + QLOG error, ok=False.
+    """
+    emit_fn = emit_fn or emit
+    popen_factory = popen_factory or subprocess.Popen
+    count = max(1, min(500, int(count)))
+    collected, seen = [], set()
+    for target in channel_targets(url, grab_type):
+        cmd = build_grab_cmd(
+            target, count=count,
+            cookies_from_browser=cookies_from_browser,
+            cookies_file=cookies_file, proxy=proxy)
+        proc = popen_factory(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, bufsize=1)
+        _register_proc(proc)
+        try:
+            for line in proc.stdout:
+                s = line.strip()
+                if s.startswith("http") and s not in seen:
+                    seen.add(s)
+                    collected.append(s)
+            rc = proc.wait()
+        finally:
+            _unregister_proc(proc)
+        if rc != 0:
+            emit_fn(f"QLOG Grab fail ho gaya: {target} "
+                    f"(yt-dlp exit {rc}) — link check karo, ya cookies try karo.")
+            emit_fn("GRABDONE 0")
+            return [], False
+    for u in collected:
+        emit_fn(f"GRAB {u}")
+    emit_fn(f"GRABDONE {len(collected)}")
+    return collected, True
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+def parse_args(argv=None):
+    parser = argparse.ArgumentParser(
+        description="Parallel queue downloader + channel grabber "
+                    "(GUI ka engine — protocol lines stdout pe)")
+    parser.add_argument("queue_file", nargs="?", default=None,
+                        help="Queue file (aik line = aik URL) — queue mode ke liye")
+    parser.add_argument("--quality", type=int, choices=QUALITY_CHOICES,
+                        default=DEFAULT_QUALITY,
+                        help="2160=4K (default), 1440=2K, 1080, 720")
+    parser.add_argument("--threads", type=int, default=DEFAULT_THREADS,
+                        help="Aik sath kitni downloads (1-16, default 4)")
+    parser.add_argument("--downloads", default=DEFAULT_DOWNLOADS,
+                        help="Downloads is folder mein (default: project downloads/)")
+    parser.add_argument("--archive", default=DEFAULT_ARCHIVE,
+                        help="download_archive file (jo ho gaya wo dobara nahi)")
+    parser.add_argument("--cookies-file", default="",
+                        help="cookies.txt ka path (login wali videos ke liye)")
+    parser.add_argument("--cookies-from-browser", default="",
+                        help="chrome / edge / firefox — browser ke cookies use karo")
+    parser.add_argument("--proxy", default="", help="Proxy URL (optional)")
+    parser.add_argument("--grab", default="",
+                        help="Grab mode: channel/profile ka URL do")
+    parser.add_argument("--grab-type", default="videos",
+                        choices=["shorts", "videos", "all"],
+                        help="YouTube channel pe konsi list (default videos)")
+    parser.add_argument("--count", type=int, default=50,
+                        help="Grab mode: zyada se zyada kitne links (1-500, default 50)")
+    return parser.parse_args(argv)
+
+
+def main(argv=None):
+    args = parse_args(argv)
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            signal.signal(sig, _on_signal)
+        except (ValueError, OSError):
+            pass  # main thread na ho to signal nahi lag sakta — koi baat nahi
+
+    common = dict(
+        cookies_from_browser=args.cookies_from_browser,
+        cookies_file=args.cookies_file, proxy=args.proxy)
+
+    # ---- grab mode ----
+    if args.grab:
+        _, ok = run_grab(args.grab, grab_type=args.grab_type,
+                         count=args.count, **common)
+        return 0 if ok else 1
+
+    # ---- queue mode ----
+    if not args.queue_file:
+        emit("QLOG Queue file nahi di — queuedl.py QUEUE_FILE ya --grab URL do.")
+        emit("QDONE total=0 done=0 failed=0 skipped=0")
+        return 1
+    if not os.path.exists(args.queue_file):
+        emit(f"QLOG Queue file nahi mili: {args.queue_file}")
+        emit("QDONE total=0 done=0 failed=0 skipped=0")
+        return 1
+    with open(args.queue_file, encoding="utf-8") as f:
+        urls = load_queue_text(f.read())
+    threads = max(1, min(16, args.threads))
+    os.makedirs(args.downloads, exist_ok=True)
+    emit(f"QLOG Queue: {len(urls)} link(s), threads={threads}")
+
+    missing_state = {"announced": False}
+    missing_lock = threading.Lock()
+
+    def announce_missing():
+        with missing_lock:
+            if missing_state["announced"]:
+                return
+            missing_state["announced"] = True
+        emit("QLOG yt-dlp nahi mila. Pehle chalao: pip install -r requirements.txt")
+
+    done = failed = skipped = 0
+    if urls:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as pool:
+            futures = [
+                pool.submit(
+                    run_one, i, url, quality=args.quality,
+                    downloads_dir=args.downloads, archive=args.archive,
+                    on_missing=announce_missing, **common)
+                for i, url in enumerate(urls)
+            ]
+            for fut in concurrent.futures.as_completed(futures):
+                status, _ = fut.result()
+                if status == "DONE":
+                    done += 1
+                elif status == "SKIPPED":
+                    skipped += 1
+                else:
+                    failed += 1
+    emit(f"QDONE total={len(urls)} done={done} failed={failed} skipped={skipped}")
+    return 0 if failed == 0 else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

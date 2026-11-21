@@ -27,13 +27,23 @@ Chalana (Windows laptop):
     python app.py                     (ya terminal se)
 
 Sections / buttons aur un ke terminal commands:
-    DOWNLOAD card:
-      Links Download Karo (Paste Wale)
-                               -> links box se paste_links.txt banake
-                                  python pipeline.py --download-only --quality <quality> [--downloads <folder>] --urls paste_links.txt
+    DOWNLOAD card (QUEUE system — SkillNova style, engine queuedl.py):
+      Links box + [Links Download Karo (Paste Wale)]
+                               -> links QUEUE list mein add, phir DOWNLOAD ALL
+      Queue Me Add Karo        -> sirf queue mein add (download abhi nahi)
+      Shorts Grab / Videos Grab
+                               -> python queuedl.py --grab <channel> --grab-type shorts|videos --count N
+                                  (GRAB lines seedha queue mein jati hain)
+      DOWNLOAD ALL             -> queue ki Pending/Failed rows gui_queue.txt mein,
+                                  python queuedl.py gui_queue.txt --quality Q --threads T [--downloads F] [cookies/proxy]
+      Retry Failed / Remove Selected / Clear Finished / Clear All
+                               -> sirf queue list ki safai (koi command nahi)
+      Neeche chhoti "Pipeline" row (purana flow, urls.txt wala):
+      Sirf Check               -> python pipeline.py --check [--downloads <folder>]
       Download Only (urls.txt wali list)
                                -> python pipeline.py --download-only [--limit N] --quality <quality> [--downloads <folder>]
-      Sirf Check               -> python pipeline.py --check [--downloads <folder>]
+      Test 1 Video / Full Pipeline -> card 2 wale hi pipeline actions
+      Update yt-dlp            -> python -m pip install -U yt-dlp
     UPLOAD — YOUTUBE card:
       Pipeline Test (1 video)  -> python pipeline.py --limit 1 --privacy <privacy> --quality <quality>
       Pipeline (Download+Upload) -> python pipeline.py --privacy <privacy> [--limit N] --quality <quality>
@@ -48,13 +58,24 @@ Sections / buttons aur un ke terminal commands:
 Quality dropdown: 2160 = 4K (default), 1440 = 2K, 1080, 720 —
 sirf download wale actions pe lagti hai.
 
+Threads dropdown (Download card): queue mode mein aik sath kitni
+downloads — 1/2/3/4/6/8/12/16, default 4. Zyada threads = tez,
+lekin net/CPU pe load bhi zyada.
+
+Cookies dropdown + Proxy entry (Download card): SIRF queue wale
+actions (DOWNLOAD ALL aur Grab) pe lagte hain — TikTok/Instagram
+ki login wali ya block honay wali videos ke liye browser cookies
+(Chrome/Edge/Firefox) ya cookies.txt file. Pipeline wale purane
+buttons pe cookies/proxy apply NAHI hote.
+
 Download Folder (Download card): Browse… se koi bhi folder chun
 sakte ho jahan downloads jayengi — default project ka downloads/
 folder entry mein pehle se likha hota hai, Reset usay wapas le
-aata hai. Ye folder pipeline ke download wale actions aur Check
-ko --downloads se pass hota hai; upload flow bhi usi folder se
-videos uthata hai (uploads.csv wahi se banti hai). Multi Upload
-ko ye pass NAHI hota — wahan queue ki rows hi sab kuch hain.
+aata hai. Ye folder pipeline ke download wale actions, Check aur
+queue download ko --downloads se pass hota hai; upload flow bhi
+usi folder se videos uthata hai (uploads.csv wahi se banti hai).
+Multi Upload ko ye pass NAHI hota — wahan queue ki rows hi sab
+kuch hain.
 """
 import os
 import re
@@ -64,6 +85,15 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PRIVACY_CHOICES = ("private", "unlisted", "public")
 QUALITY_CHOICES = ("720", "1080", "1440", "2160")  # 1440 = 2K, 2160 = 4K
 TARGET_PRESETS = ("mind-maze-yt", "mind-maze-fb", "horror-fb")
+THREADS_CHOICES = ("1", "2", "3", "4", "6", "8", "12", "16")
+GRAB_COUNT_CHOICES = ("10", "25", "50", "100")
+COOKIE_MODES = ("none", "chrome", "edge", "firefox", "file")
+# Queue row ki status values (tree + stats inhi pe chalte hain)
+Q_PENDING = "Pending"
+Q_DOWNLOADING = "Downloading"
+Q_DONE = "Done"
+Q_FAILED = "Failed"
+Q_SKIPPED = "Skipped"
 
 # --- Modern dark theme (sirf GUI in ko use karti hai) ---
 COL_BG = "#16181d"          # window background
@@ -139,6 +169,64 @@ def _parse_quality(quality):
     return q
 
 
+def _parse_threads(threads):
+    t = str(threads or "4").strip()
+    if t not in THREADS_CHOICES:
+        raise ValueError(
+            f"Threads ghalat hai: {threads!r} — in mein se aik ho: "
+            f"{', '.join(THREADS_CHOICES)}"
+        )
+    return t
+
+
+def _parse_grab_count(count):
+    c = str(count or "50").strip()
+    if c not in GRAB_COUNT_CHOICES:
+        raise ValueError(
+            f"Count ghalat hai: {count!r} — in mein se aik ho: "
+            f"{', '.join(GRAB_COUNT_CHOICES)}"
+        )
+    return c
+
+
+def _cookie_args(cookies):
+    """cookies=(mode, path) -> queuedl ke cookie args.
+
+    mode: "none" | "chrome" | "edge" | "firefox" | "file".
+    Sirf queue/grab commands mein lagte hain — pipeline wale
+    actions in ko ignore karte hain.
+    """
+    try:
+        mode, path = cookies
+    except (TypeError, ValueError):
+        raise ValueError(
+            f"Cookies ghalat hai: {cookies!r} — (mode, path) do, "
+            f"mode in mein se: {', '.join(COOKIE_MODES)}"
+        ) from None
+    mode = str(mode or "none").strip().lower()
+    path = str(path or "").strip()
+    if mode not in COOKIE_MODES:
+        raise ValueError(
+            f"Cookies mode ghalat hai: {mode!r} — in mein se aik ho: "
+            f"{', '.join(COOKIE_MODES)}"
+        )
+    if mode == "none":
+        return []
+    if mode == "file":
+        if not path:
+            raise ValueError(
+                "Cookies file mode hai lekin koi file nahi chuni — "
+                "dropdown se cookies.txt wali file select karo."
+            )
+        return ["--cookies-file", path]
+    return ["--cookies-from-browser", mode]
+
+
+def _proxy_args(proxy):
+    p = str(proxy or "").strip()
+    return ["--proxy", p] if p else []
+
+
 def extract_links(text):
     """Paste box ka text -> saaf links ki list. Pure function — koi I/O nahi.
 
@@ -161,7 +249,9 @@ def extract_links(text):
 
 
 def build_command(action, limit="", target="", privacy="private", quality="2160",
-                  download_dir="", urls_file=""):
+                  download_dir="", urls_file="", threads="4",
+                  cookies=("none", ""), proxy="", grab_url="",
+                  grab_count="50"):
     """Action -> command list. Pure function — koi window, koi subprocess nahi.
 
     Script names app wale folder ke relative hain; GUI in ko
@@ -170,13 +260,19 @@ def build_command(action, limit="", target="", privacy="private", quality="2160"
     download_dir: pipeline ke download wale actions (download_only,
     pipeline_test1, pipeline) aur check ko --downloads se pass hota
     hai — check bhi usi folder ko scan karke uploads.csv banata hai.
-    Khaali/whitespace ho to pass NAHI hota (pipeline ka apna default
+    Queue download (queue_download) ko bhi pass hota hai. Khaali/
+    whitespace ho to pass NAHI hota (script ka apna default
     downloads/ lagta hai). Multi actions ko kabhi pass nahi hota.
 
-    urls_file: sirf download wale actions (download_only,
-    pipeline_test1, pipeline) ko --urls se pass hota hai — paste
-    wale links ke liye GUI paste_links.txt bana ke ye deta hai.
+    urls_file: download wale pipeline actions (download_only,
+    pipeline_test1, pipeline) ko --urls se pass hota hai. Queue
+    download ke liye yehi param queue file ka path hai (GUI
+    gui_queue.txt deta hai; khaali ho to wahi default lagta hai).
     Check / multi ko kabhi pass nahi hota.
+
+    threads / cookies / proxy: SIRF queue system (queue_download
+    aur grab_*) ke liye hain — baaki actions in ko ignore karte
+    hain. cookies=(mode, path), dekho _cookie_args.
     """
     py = sys.executable
     lim = _parse_limit(limit)
@@ -222,6 +318,32 @@ def build_command(action, limit="", target="", privacy="private", quality="2160"
             cmd += ["--urls", uf]
         return cmd
 
+    if action == "queue_download":
+        cmd = [py, "queuedl.py", uf or "gui_queue.txt",
+               "--quality", q, "--threads", _parse_threads(threads)]
+        if dl:
+            cmd += ["--downloads", dl]
+        cmd += _cookie_args(cookies)
+        cmd += _proxy_args(proxy)
+        return cmd
+
+    if action in ("grab_shorts", "grab_videos"):
+        url = (grab_url or "").strip()
+        if not url:
+            raise ValueError(
+                "Channel / Profile link khaali hai — pehle upar wale "
+                "field mein channel ka link likho."
+            )
+        cmd = [py, "queuedl.py", "--grab", url,
+               "--grab-type", "shorts" if action == "grab_shorts" else "videos",
+               "--count", _parse_grab_count(grab_count)]
+        cmd += _cookie_args(cookies)
+        cmd += _proxy_args(proxy)
+        return cmd
+
+    if action == "update_ytdlp":
+        return [py, "-m", "pip", "install", "-U", "yt-dlp"]
+
     if action == "multi_check":
         cmd = [py, "multi_upload.py", "--check"]
         if tgt:
@@ -240,8 +362,94 @@ def build_command(action, limit="", target="", privacy="private", quality="2160"
 
     raise ValueError(
         f"Unknown action: {action!r} — sahi actions: check, download_only, "
-        f"pipeline_test1, pipeline, multi_check, multi_upload"
+        f"pipeline_test1, pipeline, multi_check, multi_upload, "
+        f"queue_download, grab_shorts, grab_videos, update_ytdlp"
     )
+
+
+_QITEM_RE = re.compile(
+    r"^QITEM\s+(\d+)\s+(START|PROGRESS|DONE|FAILED|SKIPPED)\s+(\d+)\s*$")
+_QDONE_RE = re.compile(
+    r"^QDONE\s+total=(\d+)\s+done=(\d+)\s+failed=(\d+)\s+skipped=(\d+)\s*$")
+
+
+def parse_qitem(line):
+    """queuedl ki 'QITEM <i> <STATUS> <pct>' line -> (index, status, pct).
+
+    STATUS: START / PROGRESS / DONE / FAILED / SKIPPED. Line match
+    na ho (ya khaali/garbage ho) to None. Pure function.
+    """
+    if not line:
+        return None
+    m = _QITEM_RE.match(str(line).strip())
+    if m is None:
+        return None
+    return int(m.group(1)), m.group(2), int(m.group(3))
+
+
+def parse_grab_line(line):
+    """queuedl ki 'GRAB <url>' line -> url, warna None.
+
+    Note: 'GRABDONE 5' is se match NAHI hoti — 'GRAB ' ke baad
+    space lazmi hai aur baaki hissa http se shuru hona chahiye.
+    """
+    if not line:
+        return None
+    s = str(line).strip()
+    if not s.startswith("GRAB "):
+        return None
+    url = s[len("GRAB "):].strip()
+    if url.startswith("http://") or url.startswith("https://"):
+        return url
+    return None
+
+
+def parse_qdone(line):
+    """'QDONE total=N done=N failed=N skipped=N' -> dict, warna None."""
+    if not line:
+        return None
+    m = _QDONE_RE.match(str(line).strip())
+    if m is None:
+        return None
+    return {"total": int(m.group(1)), "done": int(m.group(2)),
+            "failed": int(m.group(3)), "skipped": int(m.group(4))}
+
+
+def queue_stats(rows):
+    """Queue rows -> stats dict. Pure function.
+
+    Row = dict jiska 'status' Q_PENDING / Q_DOWNLOADING / Q_DONE /
+    Q_FAILED / Q_SKIPPED mein se aik hai. 'remaining' = Pending
+    (abhi shuru nahi hue); Downloading alag gina jata hai.
+    """
+    stats = {"total": len(rows), "downloaded": 0, "remaining": 0,
+             "downloading": 0, "failed": 0, "skipped": 0}
+    for r in rows:
+        st = r.get("status")
+        if st == Q_DONE:
+            stats["downloaded"] += 1
+        elif st == Q_PENDING:
+            stats["remaining"] += 1
+        elif st == Q_DOWNLOADING:
+            stats["downloading"] += 1
+        elif st == Q_FAILED:
+            stats["failed"] += 1
+        elif st == Q_SKIPPED:
+            stats["skipped"] += 1
+    return stats
+
+
+def dedupe_new(existing_urls, new_links):
+    """new_links mein se sirf wo jo existing mein nahi hain —
+    batch ke andar ke duplicates bhi aik dafa. Order waisa hi."""
+    seen = set(existing_urls or [])
+    out = []
+    for link in new_links or []:
+        if link in seen:
+            continue
+        seen.add(link)
+        out.append(link)
+    return out
 
 
 _PROGRESS_RE = re.compile(r"(\d+(?:\.\d+)?)\s*%")
@@ -296,8 +504,8 @@ def _build_gui(tk, scrolledtext):
 
     root = tk.Tk()
     root.title("Bulk Tool")
-    root.geometry("900x800")
-    root.minsize(820, 740)
+    root.geometry("940x880")
+    root.minsize(860, 780)
     root.configure(bg=COL_BG)
 
     # ttk styles — clam theme pe progress bar / combobox ke rang lagte hain
@@ -323,8 +531,24 @@ def _build_gui(tk, scrolledtext):
     root.option_add("*TCombobox*Listbox.foreground", COL_TEXT)
     root.option_add("*TCombobox*Listbox.selectBackground", COL_ACCENT)
     root.option_add("*TCombobox*Listbox.selectForeground", "#ffffff")
+    style.configure(
+        "Dark.Treeview",
+        background=COL_INPUT, fieldbackground=COL_INPUT,
+        foreground=COL_TEXT, bordercolor=COL_BORDER,
+        lightcolor=COL_BORDER, darkcolor=COL_BORDER, rowheight=22,
+        font=FONT_SMALL,
+    )
+    style.configure(
+        "Dark.Treeview.Heading",
+        background=COL_BTN, foreground=COL_TEXT,
+        bordercolor=COL_BORDER, font=FONT_UI,
+    )
+    style.map("Dark.Treeview",
+              background=[("selected", COL_ACCENT)],
+              foreground=[("selected", "#ffffff")])
 
-    state = {"proc": None, "running": False, "stopped": False}
+    state = {"proc": None, "running": False, "stopped": False,
+             "run_kind": None, "run_row_ids": []}
     out_queue = queue.Queue()
     buttons = []
 
@@ -414,12 +638,21 @@ def _build_gui(tk, scrolledtext):
         status_var.set(text)
         status_lbl.config(fg=color)
 
-    # ---------- card 1: DOWNLOAD ----------
+    # ---------- card 1: DOWNLOAD (queue system) ----------
     quality_var = tk.StringVar(value="2160")
     limit_var = tk.StringVar()
+    threads_var = tk.StringVar(value="4")
+    channel_var = tk.StringVar()
+    grab_count_var = tk.StringVar(value="50")
+    cookies_var = tk.StringVar(value="None")
+    cookies_file = {"path": ""}  # cookies.txt mode mein chuni hui file
+    cookies_file_var = tk.StringVar(value="")
+    proxy_var = tk.StringVar()
+    default_downloads = os.path.join(BASE_DIR, "downloads")
+    download_dir_var = tk.StringVar(value=default_downloads)
     card1 = make_card("DOWNLOAD", COL_GREEN)
-    # Paste links box — SAB SE AASAN tareeqa: urls.txt edit karne ki
-    # zaroorat nahi, links seedha yahan paste karo.
+    # 1) Paste links box — links seedha yahan paste karo, urls.txt
+    # edit karne ki zaroorat nahi.
     tk.Label(card1,
              text="Video Links — yahan paste karo "
                   "(aik line = aik link: YouTube / TikTok / Facebook…)",
@@ -441,22 +674,327 @@ def _build_gui(tk, scrolledtext):
     btns0.pack(fill="x", pady=(0, 10))
     b_paste = primary_btn(btns0, "Links Download Karo (Paste Wale)",
                           COL_GREEN, COL_GREEN_ACTIVE,
-                          lambda: run_paste_download())
-    b_paste.pack(fill="x")
+                          lambda: on_paste_download())
+    b_paste.pack(side="left", fill="x", expand=True, padx=(0, 6))
+    b_add_queue = secondary_btn(btns0, "Queue Me Add Karo",
+                                lambda: on_add_to_queue())
+    b_add_queue.pack(side="left")
+    # 2) Channel / Profile grab row
+    grow = tk.Frame(card1, bg=COL_CARD)
+    grow.pack(fill="x", pady=(0, 6))
+    field_label(grow, "Channel / Profile link:").pack(side="left")
+    dark_entry(grow, channel_var, 40).pack(
+        side="left", fill="x", expand=True, padx=(6, 0))
+    grow2 = tk.Frame(card1, bg=COL_CARD)
+    grow2.pack(fill="x", pady=(0, 10))
+    b_grab_s = secondary_btn(grow2, "Shorts Grab",
+                             lambda: on_grab("shorts"))
+    b_grab_s.pack(side="left", padx=(0, 6))
+    b_grab_v = secondary_btn(grow2, "Videos Grab",
+                             lambda: on_grab("videos"))
+    b_grab_v.pack(side="left", padx=(0, 18))
+    field_label(grow2, "Count:").pack(side="left")
+    dark_option_menu(grow2, grab_count_var, GRAB_COUNT_CHOICES,
+                     width=5).pack(side="left", padx=(6, 0))
+    hint_label(grow2, "channel ke links seedha queue mein aa jayenge"
+               ).pack(side="left", padx=(8, 0))
+    # 3) QUEUE list — har link aik row: status live update hota hai
+    tk.Label(card1, text="QUEUE", font=FONT_SECTION,
+             bg=COL_CARD, fg=COL_TEXT).pack(anchor="w", pady=(0, 4))
+    tree_frame = tk.Frame(card1, bg=COL_CARD)
+    tree_frame.pack(fill="x", pady=(0, 6))
+    tree = ttk.Treeview(tree_frame, columns=("num", "link", "status"),
+                        show="headings", height=7, style="Dark.Treeview",
+                        selectmode="extended")
+    tree.heading("num", text="#")
+    tree.heading("link", text="Link")
+    tree.heading("status", text="Status")
+    tree.column("num", width=40, minwidth=32, stretch=False, anchor="center")
+    tree.column("link", width=520, minwidth=200, stretch=True)
+    tree.column("status", width=170, minwidth=130, stretch=False)
+    tree_scroll = tk.Scrollbar(tree_frame, orient="vertical",
+                               command=tree.yview)
+    tree.config(yscrollcommand=tree_scroll.set)
+    tree_scroll.pack(side="right", fill="y")
+    tree.pack(side="left", fill="x", expand=True)
+    # 4) Queue buttons
+    qbtns = tk.Frame(card1, bg=COL_CARD)
+    qbtns.pack(fill="x", pady=(0, 6))
+    b_dl_all = primary_btn(qbtns, "DOWNLOAD ALL", COL_GREEN,
+                           COL_GREEN_ACTIVE,
+                           lambda: start_download_all())
+    b_dl_all.pack(side="left", fill="x", expand=True, padx=(0, 6))
+    b_stop_all = tk.Button(
+        qbtns, text="STOP ALL", command=lambda: stop_proc(),
+        bg=COL_RED, fg="#ffffff", activebackground=COL_RED_ACTIVE,
+        activeforeground="#ffffff", relief="flat", bd=0, font=FONT_BTN,
+        padx=16, pady=12, cursor="hand2")
+    b_stop_all.pack(side="left")
+    qbtns2 = tk.Frame(card1, bg=COL_CARD)
+    qbtns2.pack(fill="x", pady=(0, 6))
+    b_retry = small_btn(qbtns2, "Retry Failed",
+                        lambda: start_download_all(only_failed=True))
+    b_retry.pack(side="left", padx=(0, 6))
+    b_remove = small_btn(qbtns2, "Remove Selected",
+                         lambda: on_remove_selected())
+    b_remove.pack(side="left", padx=(0, 6))
+    b_clear_fin = small_btn(qbtns2, "Clear Finished",
+                            lambda: on_clear_finished())
+    b_clear_fin.pack(side="left", padx=(0, 6))
+    b_clear_all = small_btn(qbtns2, "Clear All",
+                            lambda: on_clear_all())
+    b_clear_all.pack(side="left")
+    # 5) Stats label
+    stats_var = tk.StringVar(
+        value="Total: 0 | Downloaded: 0 | Remaining: 0 | "
+              "Downloading: 0 | Failed: 0")
+    tk.Label(card1, textvariable=stats_var, font=FONT_SMALL,
+             bg=COL_CARD, fg=COL_MUTED).pack(anchor="w", pady=(0, 8))
+    # ---------- queue state + helpers (DOWNLOAD card) ----------
+    queue_rows = []          # [{"url", "status", "pct", "iid"}]
+    queue_ids = {"next": 0}  # tree item ids ka counter
+
+    def row_status_text(row):
+        st = row["status"]
+        if st == Q_DOWNLOADING:
+            return f"Downloading… {row['pct']}%"
+        if st == Q_DONE:
+            return "Done ✓"
+        if st == Q_FAILED:
+            return "Failed ✗"
+        if st == Q_SKIPPED:
+            return "Skipped (pehle se hai)"
+        return "Pending"
+
+    def update_stats():
+        s = queue_stats(queue_rows)
+        stats_var.set(
+            f"Total: {s['total']} | Downloaded: {s['downloaded']} | "
+            f"Remaining: {s['remaining']} | "
+            f"Downloading: {s['downloading']} | Failed: {s['failed']}")
+
+    def refresh_queue_view():
+        for iid in tree.get_children():
+            tree.delete(iid)
+        for n, row in enumerate(queue_rows, 1):
+            tree.insert("", "end", iid=row["iid"],
+                        values=(n, row["url"], row_status_text(row)))
+        update_stats()
+
+    def add_links_to_queue(links, announce=True):
+        """Links queue mein add karo (dedupe ke sath). Naye add hue gin ke do."""
+        new = dedupe_new([r["url"] for r in queue_rows], links)
+        for url in new:
+            queue_ids["next"] += 1
+            iid = f"q{queue_ids['next']}"
+            row = {"url": url, "status": Q_PENDING, "pct": 0, "iid": iid}
+            queue_rows.append(row)
+            tree.insert("", "end", iid=iid,
+                        values=(len(queue_rows), url, row_status_text(row)))
+        if new:
+            update_stats()
+        if announce:
+            write_log(f"Queue me {len(new)} naye link(s) add hue "
+                      f"(kul {len(queue_rows)})\n")
+        return len(new)
+
+    def update_run_row(index, status, pct):
+        """QITEM line -> chal rahi run ki row ka status + overall progress."""
+        ids = state.get("run_row_ids") or []
+        if index < 0 or index >= len(ids):
+            return
+        iid = ids[index]
+        row = next((r for r in queue_rows if r["iid"] == iid), None)
+        if row is None:
+            return
+        if status in ("START", "PROGRESS"):
+            row["status"] = Q_DOWNLOADING
+            row["pct"] = pct
+        elif status == "DONE":
+            row["status"] = Q_DONE
+            row["pct"] = 100
+        elif status == "FAILED":
+            row["status"] = Q_FAILED
+            row["pct"] = pct
+        elif status == "SKIPPED":
+            row["status"] = Q_SKIPPED
+            row["pct"] = 100
+        try:
+            tree.set(iid, "status", row_status_text(row))
+        except tk.TclError:
+            pass
+        update_stats()
+        run_rows = [r for r in queue_rows if r["iid"] in ids]
+        if run_rows:
+            avg = sum(r["pct"] for r in run_rows) / len(run_rows)
+            progress.stop()
+            progress.config(mode="determinate", value=avg)
+            progress_text.set(f"{avg:g}%")
+
+    def on_add_to_queue():
+        links = extract_links(links_text.get("1.0", "end"))
+        if not links:
+            write_log("\nPehle box me kam az kam aik link paste karo.\n")
+            return
+        add_links_to_queue(links)
+
+    def on_paste_download():
+        """Paste wale links queue mein add + (kuch na chal raha ho to)
+        DOWNLOAD ALL shuru. Chal rahi run mein naye links NAHI jate —
+        wo agli DOWNLOAD ALL mein ayenge."""
+        links = extract_links(links_text.get("1.0", "end"))
+        if links:
+            add_links_to_queue(links)
+        if state["running"]:
+            if links:
+                write_log("Chal rahi download me ye nahi aayenge — "
+                          "agli DOWNLOAD ALL me aayenge.\n")
+            return
+        if not any(r["status"] in (Q_PENDING, Q_FAILED) for r in queue_rows):
+            write_log("\nPehle box me kam az kam aik link paste karo.\n")
+            set_status("● Error", COL_RED)
+            return
+        start_download_all()
+
+    def start_download_all(only_failed=False):
+        """Pending (ya sirf Failed) rows -> gui_queue.txt -> queuedl run."""
+        if state["running"]:
+            return
+        if only_failed:
+            targets = [r for r in queue_rows if r["status"] == Q_FAILED]
+            for r in targets:
+                r["status"] = Q_PENDING
+                r["pct"] = 0
+            if targets:
+                refresh_queue_view()
+        else:
+            targets = [r for r in queue_rows
+                       if r["status"] in (Q_PENDING, Q_FAILED)]
+        if not targets:
+            write_log("Queue me download ke liye koi Pending link "
+                      "nahi hai.\n")
+            return
+        queue_path = os.path.join(BASE_DIR, "gui_queue.txt")
+        try:
+            with open(queue_path, "w", encoding="utf-8") as f:
+                f.write("\n".join(r["url"] for r in targets) + "\n")
+        except OSError as e:
+            write_log(f"\nERROR: gui_queue.txt likh nahi saka — {e}\n")
+            set_status("● Error", COL_RED)
+            return
+        state["run_row_ids"] = [r["iid"] for r in targets]
+        state["run_kind"] = "queue"
+        run_action("queue_download", urls_file=queue_path)
+
+    def on_grab(kind):
+        url = channel_var.get().strip()
+        if not url:
+            write_log("\nPehle Channel / Profile link likho.\n")
+            set_status("● Error", COL_RED)
+            return
+        if state["running"]:
+            return
+        state["run_kind"] = "grab"
+        run_action("grab_shorts" if kind == "shorts" else "grab_videos",
+                   grab_url=url)
+
+    def on_remove_selected():
+        if state["running"]:
+            write_log("Download chal rahi hai — pehle Stop karo.\n")
+            return
+        sel = set(tree.selection())
+        if not sel:
+            write_log("Pehle queue me se koi row select karo.\n")
+            return
+        queue_rows[:] = [r for r in queue_rows if r["iid"] not in sel]
+        refresh_queue_view()
+        write_log("Selected row(s) queue se hata diye.\n")
+
+    def on_clear_finished():
+        if state["running"]:
+            write_log("Download chal rahi hai — pehle Stop karo.\n")
+            return
+        queue_rows[:] = [r for r in queue_rows
+                         if r["status"] not in (Q_DONE, Q_SKIPPED)]
+        refresh_queue_view()
+
+    def on_clear_all():
+        if state["running"]:
+            write_log("Download chal rahi hai — pehle Stop karo.\n")
+            return
+        queue_rows.clear()
+        refresh_queue_view()
+
+    def on_cookies_change(choice):
+        if choice.startswith("cookies.txt"):
+            path = filedialog.askopenfilename(
+                title="cookies.txt file chuno",
+                filetypes=[("Text files", "*.txt"),
+                           ("All files", "*.*")])
+            if path:
+                cookies_file["path"] = path
+                cookies_file_var.set(os.path.basename(path))
+            else:  # cancel -> wapas None
+                cookies_var.set("None")
+                cookies_file["path"] = ""
+                cookies_file_var.set("")
+        else:
+            cookies_file["path"] = ""
+            cookies_file_var.set("")
+
+    def current_cookies():
+        label = cookies_var.get()
+        if label == "Chrome":
+            return ("chrome", "")
+        if label == "Edge":
+            return ("edge", "")
+        if label == "Firefox":
+            return ("firefox", "")
+        if label.startswith("cookies.txt"):
+            return ("file", cookies_file["path"])
+        return ("none", "")
+
+    # 6) Fields rows: Quality / Threads / Limit
     row1 = tk.Frame(card1, bg=COL_CARD)
     row1.pack(fill="x", pady=(0, 8))
     field_label(row1, "Quality:").pack(side="left")
     dark_option_menu(row1, quality_var, ("2160", "1440", "1080", "720")).pack(
         side="left", padx=(6, 4))
-    hint_label(row1, "(2160 = 4K, 1440 = 2K)").pack(side="left", padx=(0, 18))
+    hint_label(row1, "(2160 = 4K, 1440 = 2K)").pack(side="left", padx=(0, 14))
+    field_label(row1, "Threads:").pack(side="left")
+    dark_option_menu(row1, threads_var, THREADS_CHOICES, width=4).pack(
+        side="left", padx=(6, 4))
+    hint_label(row1, "aik sath kitni downloads").pack(
+        side="left", padx=(0, 14))
     field_label(row1, "Limit (optional):").pack(side="left")
     dark_entry(row1, limit_var, 8).pack(side="left", padx=(6, 0))
-    hint_label(row1, "khaali = saari videos").pack(side="left", padx=(6, 0))
-    # Download Folder row — default project ka downloads/ entry mein
+    hint_label(row1, "sirf purani pipeline pe").pack(side="left", padx=(6, 0))
+    # Cookies / Proxy row — sirf queue + grab pe lagte hain
+    row1c = tk.Frame(card1, bg=COL_CARD)
+    row1c.pack(fill="x", pady=(0, 8))
+    field_label(row1c, "Cookies:").pack(side="left")
+    cookies_menu = tk.OptionMenu(
+        row1c, cookies_var, "None", "Chrome", "Edge", "Firefox",
+        "cookies.txt file…", command=on_cookies_change)
+    cookies_menu.config(bg=COL_INPUT, fg=COL_TEXT,
+                        activebackground=COL_BTN_ACTIVE,
+                        activeforeground=COL_TEXT, relief="flat", bd=0,
+                        highlightthickness=1, highlightbackground=COL_BORDER,
+                        font=FONT_UI, cursor="hand2", width=16)
+    try:
+        cookies_menu["menu"].config(bg=COL_INPUT, fg=COL_TEXT,
+                                    activebackground=COL_ACCENT,
+                                    activeforeground="#ffffff")
+    except tk.TclError:
+        pass
+    cookies_menu.pack(side="left", padx=(6, 4))
+    tk.Label(row1c, textvariable=cookies_file_var, font=FONT_SMALL,
+             bg=COL_CARD, fg=COL_MUTED).pack(side="left", padx=(0, 14))
+    field_label(row1c, "Proxy (optional):").pack(side="left")
+    dark_entry(row1c, proxy_var, 22).pack(
+        side="left", fill="x", expand=True, padx=(6, 0))
+    # 7) Download Folder row — default project ka downloads/ entry mein
     # pehle se likha hai taake user ko pata ho files kahan jati hain.
-    default_downloads = os.path.join(BASE_DIR, "downloads")
-    download_dir_var = tk.StringVar(value=default_downloads)
-
     def browse_folder():
         chosen = filedialog.askdirectory(
             initialdir=download_dir_var.get() or BASE_DIR,
@@ -474,16 +1012,33 @@ def _build_gui(tk, scrolledtext):
         side="left", fill="x", expand=True, padx=(6, 6))
     small_btn(row1b, "Browse…", browse_folder).pack(side="left", padx=(0, 6))
     small_btn(row1b, "Reset", reset_folder).pack(side="left")
+    # 8) Purana pipeline flow — chhoti row (urls.txt wala tareeqa)
+    tk.Frame(card1, bg=COL_BORDER, height=1).pack(fill="x", pady=(4, 8))
+    tk.Label(card1,
+             text="Pipeline (urls.txt → download + YouTube upload CSV):",
+             font=FONT_SMALL, bg=COL_CARD, fg=COL_MUTED).pack(
+        anchor="w", pady=(0, 6))
     btns1 = tk.Frame(card1, bg=COL_CARD)
     btns1.pack(fill="x")
-    b_download = primary_btn(btns1, "Download Only (urls.txt wali list)",
-                             COL_GREEN, COL_GREEN_ACTIVE,
-                             lambda: run_action("download_only"))
-    b_download.pack(side="left", fill="x", expand=True, padx=(0, 6))
-    b_check = secondary_btn(btns1, "Sirf Check",
-                            lambda: run_action("check"))
-    b_check.pack(side="left")
-    buttons += [b_paste, b_download, b_check]
+    b_check = small_btn(btns1, "Sirf Check",
+                        lambda: run_action("check"))
+    b_check.pack(side="left", padx=(0, 6))
+    b_download = small_btn(btns1, "Download Only (urls.txt wali list)",
+                           lambda: run_action("download_only"))
+    b_download.pack(side="left", padx=(0, 6))
+    b_test1_small = small_btn(btns1, "Test 1 Video",
+                              lambda: run_action("pipeline_test1"))
+    b_test1_small.pack(side="left", padx=(0, 6))
+    b_pipeline_small = small_btn(btns1, "Full Pipeline",
+                                 lambda: run_action("pipeline"))
+    b_pipeline_small.pack(side="left", padx=(0, 6))
+    b_update = small_btn(btns1, "Update yt-dlp",
+                         lambda: run_action("update_ytdlp"))
+    b_update.pack(side="left")
+    buttons += [b_paste, b_add_queue, b_grab_s, b_grab_v, b_dl_all,
+                b_retry, b_remove, b_clear_fin, b_clear_all,
+                b_check, b_download, b_test1_small, b_pipeline_small,
+                b_update]
 
     # ---------- card 2: UPLOAD — YOUTUBE ----------
     privacy_var = tk.StringVar(value="private")
@@ -545,7 +1100,7 @@ def _build_gui(tk, scrolledtext):
     tk.Label(main, text="Live Log", font=FONT_SECTION,
              bg=COL_BG, fg=COL_TEXT).pack(anchor="w")
     log = scrolledtext.ScrolledText(
-        main, wrap="word", height=12, bg=COL_LOG_BG, fg=COL_LOG_FG,
+        main, wrap="word", height=8, bg=COL_LOG_BG, fg=COL_LOG_FG,
         insertbackground=COL_LOG_FG, font=FONT_LOG, relief="flat",
         highlightthickness=1, highlightbackground=COL_BORDER)
     log.pack(fill="both", expand=True, pady=(4, 10))
@@ -593,6 +1148,40 @@ def _build_gui(tk, scrolledtext):
             pass
         out_queue.put(("__EXIT__", proc.wait()))
 
+    def handle_output_line(line):
+        """Aik output line ka faisla: queuedl protocol lines (QITEM /
+        GRAB / GRABDONE / QDONE / QLOG) queue ko update karti hain —
+        un ki raw shakal log mein NAHI ati. Baaki sab pehle ki tarah
+        log + progress bar."""
+        s = line.rstrip("\r\n")
+        if s.startswith("QITEM "):
+            parsed = parse_qitem(s)
+            if parsed is not None:
+                update_run_row(*parsed)
+            return
+        if s.startswith("GRABDONE "):
+            n = s[len("GRABDONE "):].strip()
+            write_log(f"Channel se {n} link(s) queue me aa gaye\n")
+            return
+        grabbed = parse_grab_line(s)
+        if grabbed is not None:
+            add_links_to_queue([grabbed], announce=False)
+            return
+        qd = parse_qdone(s)
+        if qd is not None:
+            write_log(f"Queue khatam: Done {qd['done']}, "
+                      f"Failed {qd['failed']}, Skipped {qd['skipped']}\n")
+            return
+        if s.startswith("QLOG "):
+            write_log(s[len("QLOG "):] + "\n")
+            return
+        write_log(line)
+        pct = parse_progress(line)
+        if pct is not None and state["running"]:
+            progress.stop()
+            progress.config(mode="determinate", value=pct)
+            progress_text.set(f"{pct:g}%")
+
     def poll_queue():
         try:
             while True:
@@ -602,6 +1191,20 @@ def _build_gui(tk, scrolledtext):
                     was_stopped = state["stopped"]
                     state["running"] = False
                     state["proc"] = None
+                    # Queue run adhoori ruk jaye (Stop/error) to jo rows
+                    # "Downloading" reh gayi hain wo Pending wapas —
+                    # warna stats hamesha ke liye atak jayenge.
+                    if state.get("run_kind") == "queue":
+                        stuck = False
+                        for r in queue_rows:
+                            if r["status"] == Q_DOWNLOADING:
+                                r["status"] = Q_PENDING
+                                r["pct"] = 0
+                                stuck = True
+                        if stuck:
+                            refresh_queue_view()
+                    state["run_kind"] = None
+                    state["run_row_ids"] = []
                     set_buttons(True)
                     stop_btn.config(state="disabled")
                     progress.stop()
@@ -619,42 +1222,12 @@ def _build_gui(tk, scrolledtext):
                         set_status("● Error", COL_RED)
                     write_log(f"\nKHATAM — exit code {code}\n")
                 else:
-                    write_log(item)
-                    pct = parse_progress(item)
-                    if pct is not None and state["running"]:
-                        progress.stop()
-                        progress.config(mode="determinate", value=pct)
-                        progress_text.set(f"{pct:g}%")
+                    handle_output_line(item)
         except queue.Empty:
             pass
         root.after(100, poll_queue)
 
-    def run_paste_download():
-        """Paste box ke links -> paste_links.txt -> download_only run.
-
-        Limit pass NAHI hota — user ne bilkul wahi links paste kiye
-        hain jo usay chahiye hain. Quality aur Download Folder
-        maujooda fields se lagte hain.
-        """
-        if state["running"]:
-            return
-        links = extract_links(links_text.get("1.0", "end"))
-        if not links:
-            write_log("\nPehle box me kam az kam aik link paste karo.\n")
-            set_status("● Error", COL_RED)
-            return
-        paste_path = os.path.join(BASE_DIR, "paste_links.txt")
-        try:
-            with open(paste_path, "w", encoding="utf-8") as f:
-                f.write("\n".join(links) + "\n")
-        except OSError as e:
-            write_log(f"\nERROR: paste_links.txt likh nahi saka — {e}\n")
-            set_status("● Error", COL_RED)
-            return
-        write_log(f"\nPaste links: {len(links)} link(s) — download shuru…\n")
-        run_action("download_only", urls_file=paste_path, use_limit=False)
-
-    def run_action(action, urls_file="", use_limit=True):
+    def run_action(action, urls_file="", use_limit=True, grab_url=""):
         if state["running"]:
             return
         try:
@@ -666,9 +1239,16 @@ def _build_gui(tk, scrolledtext):
                 quality=quality_var.get(),
                 download_dir=download_dir_var.get(),
                 urls_file=urls_file,
+                threads=threads_var.get(),
+                cookies=current_cookies(),
+                proxy=proxy_var.get(),
+                grab_url=grab_url,
+                grab_count=grab_count_var.get(),
             )
         except ValueError as e:
             write_log(f"\nERROR: {e}\n")
+            state["run_kind"] = None
+            state["run_row_ids"] = []
             return
         write_log(f"\n>>> {' '.join(cmd)}\n")
         popen_kwargs = dict(
@@ -688,6 +1268,8 @@ def _build_gui(tk, scrolledtext):
         except Exception as e:  # noqa: BLE001 — GUI ko crash nahi karna
             write_log(f"ERROR: command chal nahi saka — {e}\n")
             set_status("● Error", COL_RED)
+            state["run_kind"] = None
+            state["run_row_ids"] = []
             return
         state["proc"] = proc
         state["running"] = True

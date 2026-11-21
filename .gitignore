@@ -7,6 +7,7 @@ token.json
 uploads.csv
 urls.txt
 paste_links.txt
+gui_queue.txt
 downloads/
 state/
 download_archive.txt

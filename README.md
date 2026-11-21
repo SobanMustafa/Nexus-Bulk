@@ -23,9 +23,16 @@ neeche **Live Log** mein live nazar aata hai:
 
 | Button | Peeche wala command |
 |---|---|
-| Links Download Karo (Paste Wale) (Download card) | links `paste_links.txt` mein save, phir `python pipeline.py --download-only --quality <quality> --downloads <folder> --urls paste_links.txt` |
-| Download Only (urls.txt wali list) (Download card) | `python pipeline.py --download-only --quality <quality> --downloads <folder>` |
-| Sirf Check (Download card) | `python pipeline.py --check --downloads <folder>` |
+| Links Download Karo (Paste Wale) (Download card) | links pehle **QUEUE** mein add, phir **DOWNLOAD ALL** (neeche wala) |
+| Queue Me Add Karo (Download card) | sirf queue mein add — koi command nahi, download baad mein |
+| Shorts Grab / Videos Grab (Download card) | `python queuedl.py --grab <channel link> --grab-type shorts\|videos --count <count>` — mile hue links seedha queue mein |
+| DOWNLOAD ALL (Download card) | queue ki Pending/Failed rows `gui_queue.txt` mein, phir `python queuedl.py gui_queue.txt --quality <quality> --threads <threads> --downloads <folder>` (+ cookies/proxy set hon to) |
+| Retry Failed / Remove Selected / Clear Finished / Clear All (Download card) | sirf queue list ki safai — koi command nahi |
+| STOP ALL (Download card) | chalti hui queue download band (neeche wala Stop bhi wahi karta hai) |
+| Sirf Check (Download card, Pipeline row) | `python pipeline.py --check --downloads <folder>` |
+| Download Only (urls.txt wali list) (Download card, Pipeline row) | `python pipeline.py --download-only --quality <quality> --downloads <folder>` |
+| Test 1 Video / Full Pipeline (Download card, Pipeline row) | YouTube card wale hi pipeline actions (neeche) |
+| Update yt-dlp (Download card, Pipeline row) | `python -m pip install -U yt-dlp` |
 | Pipeline Test — Pehli 1 Video (YouTube card) | `python pipeline.py --limit 1 --privacy <privacy> --quality <quality> --downloads <folder>` |
 | Pipeline — Download + Upload (YouTube card) | `python pipeline.py --privacy <privacy> --quality <quality> --downloads <folder>` |
 | Multi Check (Multi card) | `python multi_upload.py --check` |
@@ -33,16 +40,14 @@ neeche **Live Log** mein live nazar aata hai:
 
 - **Video Links box** (Download card) — **SAB SE AASAN tareeqa:**
   links seedha box mein paste karo (aik line = aik link —
-  YouTube / TikTok / Facebook…) aur **Links Download Karo
-  (Paste Wale)** dabao; `urls.txt` edit karne ki zaroorat nahi.
-  Links `paste_links.txt` mein save ho ke download hoti hain
-  (Quality aur Download Folder upar wale fields se lagte hain,
-  Limit paste pe nahi lagta). Purana tareeqa — `urls.txt` wali
-  list aur **Download Only (urls.txt wali list)** button — bhi
-  mojood hai.
+  YouTube / TikTok / Facebook…), phir **Queue Me Add Karo** se
+  queue mein daalo ya **Links Download Karo (Paste Wale)** dabao
+  (add + download aik sath); `urls.txt` edit karne ki zaroorat
+  nahi. Purana tareeqa — `urls.txt` wali list — Download card ki
+  neeche wali **Pipeline** row mein mojood hai.
 - **Limit** (optional, Download card): kitni videos — khaali =
-  saari. Download Only aur Pipeline pe lagta hai (Pipeline Test
-  pe hamesha 1 fix hai).
+  saari. **Sirf purani pipeline** (Download Only / Pipeline)
+  pe lagta hai, queue pe nahi (Pipeline Test pe hamesha 1 fix hai).
 - **Target** (Multi card): sirf aik destination — preset
   `mind-maze-yt` / `mind-maze-fb` / `horror-fb` chuno ya khud
   likho; khaali = saare targets.
@@ -67,8 +72,66 @@ neeche **Live Log** mein live nazar aata hai:
   kuch alag install nahi karna. Agar window na khule to app saaf
   message de gi, aur terminal commands waise hi chalte rahenge.
 
+## Queue wala tareeqa (SkillNova style)
+
+Download card ab aik **queue system** hai — bilkul SkillNova
+wale flow jaisa, engine apna `queuedl.py` hai:
+
+1. **Paste → Queue:** Video Links box mein links paste karo →
+   **Queue Me Add Karo**. Har link QUEUE list mein aik row ban
+   jata hai (status: Pending). Duplicate links dobara add nahi
+   hote. **Links Download Karo (Paste Wale)** = add + download
+   aik sath; agar download pehle se chal rahi ho to naye links
+   sirf queue mein jayenge — agli DOWNLOAD ALL mein ayenge.
+2. **DOWNLOAD ALL:** queue ki saari Pending/Failed rows
+   **parallel** download hoti hain. Har row ka status live
+   badalta hai — `Downloading… NN%` → `Done ✓` / `Failed ✗` /
+   `Skipped (pehle se hai)` (archive mein pehle se mojood video
+   dobara download nahi hoti). Neeche **stats line** har waqt
+   batati hai: `Total | Downloaded | Remaining | Downloading |
+   Failed`. **STOP ALL** sab band kar deta hai (band ki hui
+   rows Pending wapas ho jati hain), **Retry Failed** sirf fail
+   hui dobara chalata hai, **Remove Selected / Clear Finished /
+   Clear All** list ki safai ke liye hain.
+3. **Threads:** aik sath kitni downloads parallel chalein
+   (1–16, default **4**). Zyada threads = tez download, lekin
+   net aur CPU pe load bhi zyada — aam laptop pe 4 theek hai.
+4. **Channel Grab:** kisi YouTube channel ka link **Channel /
+   Profile link** mein daalo → **Shorts Grab** ya **Videos
+   Grab** (Count: 10/25/50/100, default 50) — channel ke links
+   seedha queue mein aa jayenge, phir DOWNLOAD ALL. Facebook
+   page/profile ka link bhi de sakte ho (wahan URL jaisa hai
+   waisa hi use hota hai).
+5. **Cookies:** TikTok / Instagram ki **login wali ya block
+   honay wali** videos ke liye Cookies dropdown se apna browser
+   (Chrome / Edge / Firefox) chuno — tool us browser ke cookies
+   se download karega (browser mein us site pe login hona
+   chahiye) — ya `cookies.txt file…` se apni cookies file do.
+   Default **None** hai. **Note: cookies (aur proxy) sirf queue
+   wale buttons (DOWNLOAD ALL + Grab) pe apply hote hain** —
+   purani Pipeline wali row ke buttons pe NAHI.
+6. **Proxy:** optional — proxy URL likha ho to queue/grab usi
+   se jayenge.
+7. **Update yt-dlp:** koi site download se inkaar karne lage
+   (aksar yt-dlp purana honay pe hota hai) to Pipeline wali row
+   mein **Update yt-dlp** dabao — naya version install ho
+   jayega, phir dobara try karo.
+
+Terminal se queue mode akela bhi chalta hai:
+```
+python queuedl.py gui_queue.txt --threads 4 --quality 2160
+python queuedl.py --grab https://www.youtube.com/@channel --grab-type shorts --count 50
+```
+
 ## Features
 
+- **Queue Download + Channel Grab (queuedl.py)** — GUI ke queue
+  system ka engine: queue file se **parallel** downloads
+  (threads 1–16), har video ka alag yt-dlp subprocess, 1 retry,
+  `download_archive.txt` se skip, per-item progress protocol
+  (QITEM/QDONE) jo GUI ki queue list ko live update karta hai;
+  `--grab` mode channel ki Shorts/Videos list se links nikaal
+  deta hai; cookies (browser/file) aur proxy support.
 - **Bulk Download (downloader.py)** — `urls.txt` se poori queue, hundreds
   of links; quality **selectable hai — default 2160 (4K), 1440 (2K),
   1080, 720** (`--quality` flag); download folder `--downloads`
@@ -106,6 +169,9 @@ neeche **Live Log** mein live nazar aata hai:
 
 | File | Kaam |
 |---|---|
+| `app.py` | GUI app — queue system wali window (`run.bat` isay kholta hai) |
+| `queuedl.py` | Queue downloader + channel grabber — GUI ke queue system ka engine (parallel downloads, QITEM/GRAB protocol) |
+| `gui_queue.txt` | GUI ki chal rahi queue run ki file — khud banti hai, **GitHub pe NAHI** |
 | `downloader.py` | Bulk downloader (yt-dlp + FFmpeg) |
 | `uploader.py` | YouTube uploader — single channel (official API) |
 | `pipeline.py` | End-to-end glue: download → uploads.csv → upload |
@@ -225,6 +291,13 @@ Success = Reel us page pe PUBLISHED, aur
 ## Command reference
 
 ```
+# Queue downloader / grabber (GUI ka engine)
+python queuedl.py gui_queue.txt          # queue file parallel download (default threads 4, quality 2160 = 4K)
+python queuedl.py gui_queue.txt --threads 8 --quality 1080   # 8 parallel, 1080p tak
+python queuedl.py gui_queue.txt --cookies-from-browser chrome  # browser cookies (login wali sites)
+python queuedl.py --grab https://www.youtube.com/@channel --grab-type shorts --count 50   # channel se links
+python queuedl.py --grab https://www.youtube.com/@channel --grab-type all --count 25      # videos + shorts dono
+
 # Downloader
 python downloader.py                     # urls.txt ki poori queue download (default quality 2160 = 4K)
 python downloader.py --quality 1440      # 2K pe download (choices: 720 / 1080 / 1440 / 2160)
@@ -352,7 +425,8 @@ python tests/test_downloader.py  # downloader logic (build_format) — ALL LOGIC
 python tests/test_uploader.py    # uploader logic — ALL LOGIC TESTS PASS
 python tests/test_pipeline.py    # pipeline logic — ALL LOGIC TESTS PASS
 python tests/test_multi.py       # multi + FB logic — ALL LOGIC TESTS PASS
-python tests/test_app.py         # GUI command logic — ALL LOGIC TESTS PASS
+python tests/test_app.py         # GUI command + queue logic — ALL LOGIC TESTS PASS
+python tests/test_queuedl.py     # queue downloader/grabber logic (fake popen) — ALL LOGIC TESTS PASS
 ```
 Saari suites no-network / no-login hain. Downloader ka asal smoke
 test Step 2 wala `--dry-run` hai, jo network mangta hai (uska
