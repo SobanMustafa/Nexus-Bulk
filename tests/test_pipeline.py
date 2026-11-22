@@ -104,6 +104,26 @@ def test_uploaded_skip_and_missing_info():
         print("PASS: uploaded skip + missing .info.json reported (not silently lost)")
 
 
+def test_nested_folders_scan():
+    """SkillNova wali tartib: downloads/<platform>/<channel>/ mein videos
+    bhi uploads.csv mein aayen — flat top-level scan kaafi nahi."""
+    with tempfile.TemporaryDirectory() as tmp:
+        dl = os.path.join(tmp, "downloads")
+        up = os.path.join(tmp, "uploader")
+        nested = os.path.join(dl, "youtube", "MindMaze")
+        os.makedirs(nested)
+        os.makedirs(up)
+        vid = make_video_with_info(nested, "Maze Day 1 [aqz1]",
+                                   {"title": "Mind Maze Day 1", "description": "d",
+                                    "tags": ["illusion"], "categories": ["People & Blogs"]})
+        rows, problems = pipeline.build_uploads_csv(dl, "private", up)
+        assert len(rows) == 1, f"expected 1 nested row, got {rows}: {problems}"
+        assert not problems, problems
+        assert rows[0]["file"] == os.path.abspath(vid), rows[0]
+        assert rows[0]["title"] == "Mind Maze Day 1"
+        print("PASS: nested folders scan (youtube/MindMaze/ -> 1 row, abs path)")
+
+
 def test_load_urls():
     with tempfile.TemporaryDirectory() as tmp:
         p = os.path.join(tmp, "urls.txt")
@@ -141,5 +161,6 @@ if __name__ == "__main__":
     test_build_csv_and_uploader_validate()
     test_uploaded_skip_and_missing_info()
     test_load_urls()
+    test_nested_folders_scan()
     test_check_mode_no_login_no_upload()
     print("ALL LOGIC TESTS PASS")

@@ -109,7 +109,9 @@ def download_one(args):
 
     ydl_opts = {
         "format": fmt,
-        "outtmpl": os.path.join(downloads_dir, "%(title)s [%(id)s].%(ext)s"),
+        # SkillNova wali folder tartib: downloads/<platform>/<channel>/Title [id].ext
+        "outtmpl": os.path.join(downloads_dir, "%(extractor)s", "%(uploader)s",
+                                "%(title)s [%(id)s].%(ext)s"),
         "restrictfilenames": False,
         "windowsfilenames": True,          # Windows-safe naam
         "retries": RETRIES,

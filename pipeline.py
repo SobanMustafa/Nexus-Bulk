@@ -134,11 +134,12 @@ def find_video_for_info(info_path, downloads_dir):
         cand = base + ext
         if os.path.exists(cand):
             return cand
-    # Fallback: same stem se shuru hone wali koi video file
+    # Fallback: .info.json wali folder mein same stem se shuru hone wali koi video file
     stem = os.path.basename(base)
-    for name in sorted(os.listdir(downloads_dir)):
+    info_dir = os.path.dirname(info_path)
+    for name in sorted(os.listdir(info_dir)):
         if name.startswith(stem) and name.lower().endswith(VIDEO_EXTS):
-            return os.path.join(downloads_dir, name)
+            return os.path.join(info_dir, name)
     return None
 
 
@@ -208,11 +209,15 @@ def build_uploads_csv(downloads_dir, privacy, uploader_dir):
         return [], [f"downloads folder nahi mila: {downloads_dir}"]
     done = load_uploaded_set(uploader_dir)
     rows, problems = [], []
+    # Recursive scan — downloads ab <platform>/<channel>/ subfolders mein
+    # hote hain (SkillNova wali tartib), sirf top level nahi.
     infos = sorted(
-        f for f in os.listdir(downloads_dir) if f.endswith(".info.json")
+        os.path.join(root, f)
+        for root, _dirs, files in os.walk(downloads_dir)
+        for f in files if f.endswith(".info.json")
     )
-    for name in infos:
-        info_path = os.path.join(downloads_dir, name)
+    for info_path in infos:
+        name = os.path.basename(info_path)
         try:
             with open(info_path, encoding="utf-8") as f:
                 info = json.load(f)
@@ -227,17 +232,19 @@ def build_uploads_csv(downloads_dir, privacy, uploader_dir):
             continue  # pehle se uploaded — skip
         rows.append(info_to_row(info, video, privacy))
     # Videos jin ki .info.json hi nahi — user ko batao, silently skip nahi
-    known = {os.path.splitext(n[: -len(".info.json")])[0] for n in infos}
-    for name in sorted(os.listdir(downloads_dir)):
-        if name.lower().endswith(VIDEO_EXTS):
-            stem = os.path.splitext(name)[0]
-            if stem not in known and not any(
-                r["file"].endswith(name) for r in rows
-            ):
-                problems.append(
-                    f"{name}: .info.json nahi mili — dobara download karo "
-                    f"ya --upload-only se pehle metadata banao"
-                )
+    known = {os.path.splitext(os.path.basename(n)[: -len(".info.json")])[0]
+             for n in infos}
+    for root, _dirs, files in os.walk(downloads_dir):
+        for name in sorted(files):
+            if name.lower().endswith(VIDEO_EXTS):
+                stem = os.path.splitext(name)[0]
+                if stem not in known and not any(
+                    r["file"].endswith(name) for r in rows
+                ):
+                    problems.append(
+                        f"{name}: .info.json nahi mili — dobara download karo "
+                        f"ya --upload-only se pehle metadata banao"
+                    )
     return rows, problems
 
 
@@ -264,7 +271,9 @@ def download_urls(urls, downloads_dir, archive, dry_run=False,
     log(f"Quality: {max_height}p (max height {max_height})")
     ydl_opts = {
         "format": build_format(max_height),
-        "outtmpl": os.path.join(downloads_dir, "%(title)s [%(id)s].%(ext)s"),
+        # SkillNova wali folder tartib: downloads/<platform>/<channel>/Title [id].ext
+        "outtmpl": os.path.join(downloads_dir, "%(extractor)s", "%(uploader)s",
+                                "%(title)s [%(id)s].%(ext)s"),
         "restrictfilenames": False,
         "windowsfilenames": True,
         "retries": RETRIES,
