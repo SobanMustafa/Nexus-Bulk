@@ -1618,6 +1618,9 @@ def _build_gui(tk, scrolledtext):
             state["run_row_ids"] = []
             return
         write_log(f"\n>>> {' '.join(cmd)}\n")
+        env = os.environ.copy()
+        env["PYTHONIOENCODING"] = "utf-8"
+        env["PYTHONUTF8"] = "1"
         popen_kwargs = dict(
             cwd=BASE_DIR,
             stdout=subprocess.PIPE,
@@ -1626,6 +1629,7 @@ def _build_gui(tk, scrolledtext):
             bufsize=1,
             encoding="utf-8",
             errors="replace",
+            env=env,
         )
         no_window = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         if no_window:

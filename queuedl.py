@@ -35,7 +35,12 @@ _emit_lock = threading.Lock()
 def emit(line):
     """Protocol line stdout pe — thread-safe + flush."""
     with _emit_lock:
-        print(line, flush=True)
+        try:
+            print(line, flush=True)
+        except UnicodeEncodeError:
+            enc = getattr(sys.stdout, "encoding", None) or "utf-8"
+            safe = str(line).encode(enc, errors="replace").decode(enc, errors="replace")
+            print(safe, flush=True)
 
 
 # Child process registry so active yt-dlp processes terminate on parent exit/signal.
@@ -145,6 +150,7 @@ def build_download_cmd(url, quality=DEFAULT_QUALITY, downloads_dir=DEFAULT_DOWNL
         "-o", OUTPUT_TEMPLATE,
         "--write-info-json",
         "--windows-filenames",
+        "--parse-metadata", "title:(?s)(?P<title>.{1,70})",
         "--trim-filenames", "120",
         "--no-warnings",
     ]
@@ -742,6 +748,13 @@ def parse_args(argv=None):
 
 
 def main(argv=None):
+    for stream in (sys.stdout, sys.stderr):
+        reconf = getattr(stream, "reconfigure", None)
+        if reconf is not None:
+            try:
+                reconf(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
     args = parse_args(argv)
     for sig in (signal.SIGTERM, signal.SIGINT):
         try:
