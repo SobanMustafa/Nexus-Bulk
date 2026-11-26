@@ -711,9 +711,10 @@ def _build_gui(tk, scrolledtext):
         highlightthickness=1, highlightbackground=BORDER,
     )
     header.pack(fill="x", pady=(0, 10))
+    header.columnconfigure(1, weight=1)
 
     head_left = tk.Frame(header, bg=PANEL)
-    head_left.pack(side="left")
+    head_left.grid(row=0, column=0, sticky="w")
     title_row = tk.Frame(head_left, bg=PANEL)
     title_row.pack(anchor="w")
     tk.Label(
@@ -727,10 +728,31 @@ def _build_gui(tk, scrolledtext):
     tk.Label(
         head_left, text="Powered by Soban Mustafa",
         font=FONT_SUBTITLE, bg=PANEL, fg=MUTED,
-    ).pack(anchor="w", pady=(1, 0))
+    ).pack(anchor="w", pady=(2, 0))
+
+    head_mid = tk.Frame(header, bg=PANEL)
+    head_mid.grid(row=0, column=1, padx=12)
+    tk.Label(
+        head_mid, text="For contact: ",
+        font=FONT_SMALL, bg=PANEL, fg=LABEL,
+    ).pack(side="left")
+
+    def open_linkedin(_event=None):
+        import webbrowser
+        webbrowser.open_new_tab("https://www.linkedin.com/in/soban-mustafa")
+
+    linkedin_lbl = tk.Label(
+        head_mid, text="linkedin.com/in/soban-mustafa",
+        font=("Segoe UI", 9, "underline"), bg=PANEL, fg=BLUE_BRIGHT,
+        cursor="hand2",
+    )
+    linkedin_lbl.pack(side="left")
+    linkedin_lbl.bind("<Button-1>", open_linkedin)
+    linkedin_lbl.bind("<Enter>", lambda _: linkedin_lbl.config(fg="#93C5FD"))
+    linkedin_lbl.bind("<Leave>", lambda _: linkedin_lbl.config(fg=BLUE_BRIGHT))
 
     head_right = tk.Frame(header, bg=PANEL)
-    head_right.pack(side="right")
+    head_right.grid(row=0, column=2, sticky="e")
     status_pill = tk.Frame(
         head_right, bg=INPUT_BG, padx=12, pady=5,
         highlightthickness=1, highlightbackground=BORDER,
