@@ -1,46 +1,5 @@
 #!/usr/bin/env python3
-"""
-Apna Bulk Uploader — V2 (personal use only)
-=============================================
-Soban ka apna uploader, SkillNova se nahi — wahan uploader hai hi nahi.
-Official YouTube Data API v3 se: videos.insert, OAuth 2.0, resumable upload.
-
-Spec (checked 2026-11-18, Google docs — developers.google.com/youtube/v3/docs/videos/insert):
-- Endpoint: POST https://www.googleapis.com/upload/youtube/v3/videos
-- Scope: https://www.googleapis.com/auth/youtube.upload (sirf upload, aur kuch nahi)
-- Quota: videos.insert ka apna bucket — default 100 uploads/day, 1 unit each
-  (purana 1,600 units wala hisaab ab nahi — June 2026 se alag bucket hai)
-- Max file: 256 GB, video/* MIME. Resumable upload, 10 MB chunks.
-- Privacy default: private — pehli video check karke khud public/unlisted karo.
-  (Google ki docs me unverified-project wali pabandi ki wording badli hui
-  dikhti hai, is liye default private hi safe hai — surprise public nahi.)
-
-Queue: uploads.csv — aik line pe aik video
-    file,title,description,tags,category_id,privacy
-  - file: videos/ folder ke andar ya poora path, e.g. videos/maze-day1.mp4
-  - title: max 100 chars (khaali ho to filename se ban jayega)
-  - description: max 5,000 chars, khaali ho sakti hai
-  - tags: | se alag, e.g. illusion|mindmaze|shorts  (max 500 chars total)
-  - category_id: khaali ho to 22 (People & Blogs)
-  - privacy: private / unlisted / public — khaali ho to private
-
-Chalana (Windows, PowerShell):
-    pip install -r requirements.txt
-    python uploader.py --check        # pehle check: files + metadata, NO upload, NO login
-    python uploader.py                # asal upload — pehli dafa browser me Google login + Allow
-
-Pehli dafa setup (sirf aik dafa, laptop pe):
-  1. Google Cloud Console -> naya project -> YouTube Data API v3 Enable karo
-  2. APIs & Services -> Credentials -> Create Credentials -> OAuth client ID
-     -> Desktop app -> client_secrets.json download karke is folder me rakho
-  3. python uploader.py chalao — browser khulega, apne YouTube channel wale
-     Google account se Allow karo. token.json save ho jayega, dobara login nahi.
-  4. client_secrets.json aur token.json KISI ko mat bhejo — ye tumhare
-     channel ki chabi hain, GitHub pe bhi mat daalo.
-
-Sirf apne / licensed content ke liye — doosron ke videos
-re-upload karne ke liye nahi.
-"""
+"""YouTube bulk uploader using YouTube Data API v3 (OAuth 2.0, resumable)."""
 import argparse
 import csv
 import json
@@ -57,11 +16,11 @@ UPLOADED_FILE = os.path.join(BASE_DIR, "uploaded.csv")
 FAILED_FILE = os.path.join(BASE_DIR, "failed_uploads.csv")
 
 SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
-DEFAULT_CATEGORY = "22"       # People & Blogs (Google sample wala default)
-DEFAULT_PRIVACY = "private"   # safe default — pehle check, phir public karo
-CHUNK_SIZE = 10 * 1024 * 1024  # 10 MB resumable chunks
+DEFAULT_CATEGORY = "22"
+DEFAULT_PRIVACY = "private"
+CHUNK_SIZE = 10 * 1024 * 1024
 MAX_RETRIES = 3
-SLEEP_BETWEEN = 5              # videos ke beech 5s
+SLEEP_BETWEEN = 5
 MAX_TITLE = 100
 MAX_DESCRIPTION = 5000
 MAX_TAGS_LEN = 500
@@ -83,7 +42,7 @@ def resolve_file(path):
     cand2 = os.path.join(VIDEOS_DIR, path)
     if os.path.exists(cand2):
         return cand2
-    return os.path.join(VIDEOS_DIR, path)  # error message ke liye best guess
+    return os.path.join(VIDEOS_DIR, path)
 
 
 def parse_tags(raw):
@@ -177,7 +136,7 @@ def build_body(item):
     return body
 
 
-# --- Upload (sirf asal upload pe Google libs chahiye; --check bina unke chalta hai) ---
+# Google libs are imported lazily so --check works without them installed.
 
 def get_youtube_service():
     try:
@@ -228,7 +187,7 @@ def upload_one(youtube, item):
         except HttpError as e:
             last_error = e
             code = getattr(e.resp, "status", "?")
-            # 500/502/503/429 = retry; 400/401/403 (quota/auth) = ruk jao
+            # Retry transient 5xx/429 errors; fail fast on 4xx quota/auth errors.
             if code in (500, 502, 503, 429) and attempt < MAX_RETRIES:
                 wait = 2 ** attempt
                 log(f"  retry {attempt}/{MAX_RETRIES} ({code}) — {wait}s ruk ke...")
@@ -272,7 +231,6 @@ def main():
     skipped = len(items) - len(pending)
     log(f"Queue: {len(items)} video(s) — {skipped} pehle se uploaded (skip), {len(pending)} baqi")
 
-    # Validate sab kuch pehle — kharab line pe upload shuru hi na ho
     all_ok = True
     for item in pending:
         ok, errors = validate(item)

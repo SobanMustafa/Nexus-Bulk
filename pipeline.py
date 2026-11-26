@@ -1,56 +1,7 @@
 #!/usr/bin/env python3
-"""
-End-to-End Pipeline — Downloader V1 + Uploader V2 (personal use only)
-======================================================================
-Soban ka glue script: V1 aur V2 alag alag ready thay, beech mein yehi
-missing tha. Aik hi command — URL daalo, video upload ho jaye.
+"""Sequential end-to-end pipeline: urls.txt -> yt-dlp -> uploads.csv -> uploader.py.
 
-Flow:
-    urls.txt
-      -> yt-dlp download (V1 wali settings: quality selectable,
-         default 2160 = 4K; 3 retries, 5s sleep, download_archive)
-         + .info.json metadata save
-      -> downloads/ scan: har video + uski .info.json se
-         title / description / tags / category nikalo
-      -> uploads.csv auto-build (uploader V2 ke format mein)
-      -> uploader.py chalao (default privacy: private)
-
-Kyun sequential hai (V1 ke 3-parallel ki tarah nahi):
-  upload waise bhi aik ke baad aik hota hai, aur aik video download
-  karte hi uska metadata pair karna exact rehta hai — parallel mein
-  video aur .info.json ka pair ulajh sakta hai.
-
-Chalana (Windows laptop — PowerShell, is folder se):
-    pip install -r requirements.txt        # yt-dlp + Google libs
-    python pipeline.py --check             # pehle check: downloads/ se
-                                           # uploads.csv banao + uploader
-                                           # --check chalao (NO upload,
-                                           # NO login, NO download)
-    python pipeline.py --download-only     # sirf download + uploads.csv
-    python pipeline.py --upload-only       # pehle se download hui videos
-                                           # se uploads.csv + upload
-    python pipeline.py                     # poora end-to-end
-    python pipeline.py --limit 1           # pehle sirf 1 video se test
-    python pipeline.py --privacy unlisted  # default private hai
-    python pipeline.py --quality 1440      # 2K download (default 2160 = 4K hai)
-
-Pehli dafa setup (sirf aik dafa, laptop pe):
-  1. README.md ke YouTube setup (7 steps): Google Cloud project +
-     YouTube Data API v3 + OAuth client ID (Desktop app) ->
-     client_secrets.json isi project folder mein rakho.
-  2. FFmpeg chahiye (video+audio merge ke liye): winget install Gyan.FFmpeg
-  3. python pipeline.py --limit 1 --download-only se pehla download
-     test karo, phir python pipeline.py --limit 1 se pehli upload
-     (private) test karo.
-
-Caveats (pehle se verified, 2026-11-18):
-  - Quota: videos.insert = 100 uploads/day (Google docs).
-  - Unverified API project se upload ki hui videos private hi rehti
-    hain jab tak project audit na ho — pipeline ke baad bhi.
-  - client_secrets.json / token.json KISI ko mat bhejo, GitHub pe
-    mat daalo.
-  - Sirf apne / licensed content ke liye — doosron ke videos
-    re-upload karne ke liye nahi.
+Runs sequentially so each downloaded video is paired 1:1 with its .info.json metadata.
 """
 import argparse
 import csv
@@ -60,25 +11,22 @@ import subprocess
 import sys
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-# Defaults: flat layout — sab kuch project root (isi folder) mein hai.
-# Override flags se badal sakte ho.
 DEFAULT_URLS = os.path.join(BASE_DIR, "urls.txt")
 DEFAULT_DOWNLOADS = os.path.join(BASE_DIR, "downloads")
 DEFAULT_UPLOADER_DIR = BASE_DIR
 DEFAULT_ARCHIVE = os.path.join(BASE_DIR, "download_archive.txt")
 
 QUALITY_CHOICES = [720, 1080, 1440, 2160]
-DEFAULT_QUALITY = 2160  # 4K — selectable: 720 / 1080 / 1440 (2K) / 2160 (4K)
+DEFAULT_QUALITY = 2160
 RETRIES = 3
 SLEEP_BETWEEN = 5
 MAX_TITLE = 100
 MAX_DESCRIPTION = 5000
 MAX_TAGS_LEN = 500
-DEFAULT_CATEGORY = "22"  # People & Blogs (uploader V2 wala default)
+DEFAULT_CATEGORY = "22"
 DEFAULT_PRIVACY = "private"
 VIDEO_EXTS = (".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v")
 
-# yt-dlp "categories" (info.json) -> YouTube category_id
 CATEGORY_MAP = {
     "Film & Animation": "1",
     "Autos & Vehicles": "2",
@@ -134,7 +82,7 @@ def find_video_for_info(info_path, downloads_dir):
         cand = base + ext
         if os.path.exists(cand):
             return cand
-    # Fallback: .info.json wali folder mein same stem se shuru hone wali koi video file
+        # Fallback: match any video in the same folder starting with the same stem.
     stem = os.path.basename(base)
     info_dir = os.path.dirname(info_path)
     for name in sorted(os.listdir(info_dir)):
@@ -209,8 +157,7 @@ def build_uploads_csv(downloads_dir, privacy, uploader_dir):
         return [], [f"downloads folder nahi mila: {downloads_dir}"]
     done = load_uploaded_set(uploader_dir)
     rows, problems = [], []
-    # Recursive scan — downloads ab <platform>/<channel>/ subfolders mein
-    # hote hain (SkillNova wali tartib), sirf top level nahi.
+    # Walk recursively because downloads live in <platform>/<channel>/ subfolders.
     infos = sorted(
         os.path.join(root, f)
         for root, _dirs, files in os.walk(downloads_dir)
@@ -229,9 +176,9 @@ def build_uploads_csv(downloads_dir, privacy, uploader_dir):
             problems.append(f"{name}: video file nahi mili (sirf .info.json hai)")
             continue
         if video in done or os.path.abspath(video) in done or os.path.basename(video) in done:
-            continue  # pehle se uploaded — skip
+            continue
         rows.append(info_to_row(info, video, privacy))
-    # Videos jin ki .info.json hi nahi — user ko batao, silently skip nahi
+    # Report videos missing .info.json instead of silently skipping them.
     known = {os.path.splitext(os.path.basename(n)[: -len(".info.json")])[0]
              for n in infos}
     for root, _dirs, files in os.walk(downloads_dir):
@@ -271,7 +218,6 @@ def download_urls(urls, downloads_dir, archive, dry_run=False,
     log(f"Quality: {max_height}p (max height {max_height})")
     ydl_opts = {
         "format": build_format(max_height),
-        # SkillNova wali folder tartib: downloads/<platform>/<channel>/Title [id].ext
         "outtmpl": os.path.join(downloads_dir, "%(extractor)s", "%(uploader)s",
                                 "%(title)s [%(id)s].%(ext)s"),
         "restrictfilenames": False,
@@ -283,9 +229,8 @@ def download_urls(urls, downloads_dir, archive, dry_run=False,
         "download_archive": archive,
         "continuedl": True,
         "noplaylist": True,
-        "writeinfojson": True,   # <-- yehi V1 se farq hai: metadata save hoti hai
-        "writethumbnail": True,  # thumbnail bhi save (uploader V2 abhi use
-                                 # nahi karta — agle step ke liye ready)
+        "writeinfojson": True,
+        "writethumbnail": True,
         "quiet": True,
         "no_warnings": True,
     }

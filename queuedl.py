@@ -1,43 +1,13 @@
 #!/usr/bin/env python3
-"""
-Queue Downloader + Channel Grabber — SkillNova style (personal use only)
-=========================================================================
-GUI (app.py) ke naye queue system ka engine. Do kaam:
+"""Parallel queue downloader and channel grabber engine (invoked by app.py).
 
-1. QUEUE MODE — aik queue file se saari videos PARALLEL download:
-       python queuedl.py gui_queue.txt --quality 2160 --threads 4 \
-           --downloads <folder> --archive download_archive.txt
-   Har video ka apna `python -m yt_dlp` subprocess chalta hai
-   (yt-dlp import NAHI hota — is liye ye script baghair yt-dlp ke
-   bhi start ho jati hai aur saaf error deti hai).
-
-2. GRAB MODE — channel/profile se video links nikaal ke stdout pe:
-       python queuedl.py --grab https://www.youtube.com/@channel \
-           --grab-type shorts --count 50
-   YouTube channel pe /shorts ya /videos list uthata hai
-   (--grab-type all = dono, pehle videos phir shorts). Doosri
-   sites (Facebook page waghera) pe URL jaisa hai waisa use hota hai.
-   --grab-type popular: pehle bari list (pool) uthata hai, har
-   video ke views gin ke SIRF sab se zyada views wali top-N
-   queue mein deta hai (TikTok account ke liye khaas taur pe).
-
-Machine-readable protocol (har line flush hoti hai, GUI yehi parhti hai):
-    QLOG <text>                    insaani log line
-    QITEM <i> START 0              item i shuru
-    QITEM <i> PROGRESS <pct>       progress (har >=5% change ya 100 pe)
-    QITEM <i> DONE 100             ho gaya
-    QITEM <i> SKIPPED 100          archive mein pehle se tha
-    QITEM <i> FAILED <last pct>    2 koshishon ke baad bhi fail
+Runs `python -m yt_dlp` in subprocesses and emits flushed stdout protocol lines:
+    QLOG <text>
+    QITEM <i> START 0 | PROGRESS <pct> | DONE 100 | SKIPPED 100 | FAILED <pct>
     QDONE total=N done=N failed=N skipped=N
-    GRAB <url>                     grab mode: aik link mila
-    GRABDONE <count>               grab khatam
-
-Cookies / proxy (login wali ya mushkil sites ke liye):
-    --cookies-from-browser chrome|edge|firefox
-    --cookies-file cookies.txt
-    --proxy http://host:port
-
-Sirf apne / licensed content ke liye.
+    GRABMETA <json>
+    GRAB <url>
+    GRABDONE <count>
 """
 import argparse
 import atexit
@@ -56,15 +26,7 @@ DEFAULT_ARCHIVE = os.path.join(BASE_DIR, "download_archive.txt")
 QUALITY_CHOICES = [720, 1080, 1440, 2160]
 DEFAULT_QUALITY = 2160
 DEFAULT_THREADS = 4
-MAX_ATTEMPTS = 2  # har URL: pehli koshish + aik retry
-# SkillNova wali folder tartib (transcript [06:18-06:51]: pehle platform ka
-# folder, phir us ke andar channel/page ke naam ka folder):
-#   downloads/youtube/<channel>/Title [id].mp4
-#   downloads/TikTok/<account>/Title [id].mp4
-# %(extractor)s = youtube / TikTok / Facebook / Instagram waghera,
-# %(uploader)s = channel ya page ka naam. --windows-filenames naam ko
-# Windows-safe rakhta hai. --write-info-json se pipeline --check in
-# downloads ko bhi upload queue mein le sakta hai.
+MAX_ATTEMPTS = 2
 OUTPUT_TEMPLATE = "%(extractor)s/%(uploader)s/%(title)s [%(id)s].%(ext)s"
 
 _emit_lock = threading.Lock()
@@ -76,9 +38,7 @@ def emit(line):
         print(line, flush=True)
 
 
-# ---------------------------------------------------------------------------
-# Child process registry — parent band ho to bachay bhi band
-# ---------------------------------------------------------------------------
+# Child process registry so active yt-dlp processes terminate on parent exit/signal.
 _active_procs = set()
 _procs_lock = threading.Lock()
 
@@ -111,9 +71,6 @@ def _on_signal(signum, frame):  # noqa: ARG001 — signal signature
     sys.exit(128 + signum if signum else 1)
 
 
-# ---------------------------------------------------------------------------
-# Pure helpers (tests inhi ko check karte hain — koi network/subprocess nahi)
-# ---------------------------------------------------------------------------
 def build_format(max_height):
     """yt-dlp format string — downloader.py wali hi semantics:
     max_height tak ki best video + best audio, warna best."""
@@ -163,8 +120,7 @@ def _cookie_args(cookies_from_browser="", cookies_file=""):
 
 
 def _impersonate_args():
-    """Browser TLS impersonation via curl-cffi agar available ho.
-    TikTok account/profile grab ke liye lazmi hai taake Akamai anti-bot block na kare."""
+    """Use curl_cffi Chrome TLS impersonation if installed (required for TikTok anti-bot)."""
     import importlib.util
     if importlib.util.find_spec("curl_cffi") is not None:
         return ["--impersonate", "chrome"]
@@ -446,9 +402,6 @@ def parse_info_meta(text):
     return meta
 
 
-# ---------------------------------------------------------------------------
-# Runners (popen_factory injectable hai — tests fake laga sakte hain)
-# ---------------------------------------------------------------------------
 def run_one(index, url, quality=DEFAULT_QUALITY, downloads_dir=DEFAULT_DOWNLOADS,
             archive=DEFAULT_ARCHIVE, cookies_from_browser="", cookies_file="",
             proxy="", emit_fn=None, popen_factory=None, on_missing=None):
@@ -473,7 +426,7 @@ def run_one(index, url, quality=DEFAULT_QUALITY, downloads_dir=DEFAULT_DOWNLOADS
             text=True, bufsize=1, encoding="utf-8", errors="replace")
         _register_proc(proc)
         skipped = False
-        reported = -1  # is attempt mein aakhri report shuda pct
+        reported = -1
         attempt_pct = 0
         try:
             for line in proc.stdout:
@@ -590,7 +543,7 @@ def run_popular(url, count=50, cookies_from_browser="", cookies_file="",
             _unregister_proc(proc)
         return "".join(chunks), rc, errors
 
-    # ---- step 1: pool + flat view_count ----
+    # Step 1: fetch flat playlist pool with view counts where available.
     pool_cmd = build_popular_pool_cmd(
         target, popular_pool(count),
         cookies_from_browser=cookies_from_browser,
@@ -629,7 +582,7 @@ def run_popular(url, count=50, cookies_from_browser="", cookies_file="",
             f"QLOG Popular: kul {len(entries)} videos mili, "
             f"top {len(ranked)} views ke hisaab se queue me")
 
-    # ---- step 2: pehli 40 ka full info (view_count ke liye) ----
+    # Step 2: flat listing lacked view counts; fetch full info for the first 40 URLs.
     first_urls = []
     seen = set()
     for e in entries:
@@ -656,7 +609,7 @@ def run_popular(url, count=50, cookies_from_browser="", cookies_file="",
             f"QLOG Popular: views dusri koshish me mile, "
             f"top {len(ranked)} queue me")
 
-    # ---- fallback: views ka data hi nahi — asal order ----
+    # Fallback: no view counts available anywhere; preserve original order.
     fallback = first_urls[:count]
     if "facebook.com" in url.lower():
         note = "QLOG FB pe views nahi mile, latest videos liye hain"
@@ -666,9 +619,6 @@ def run_popular(url, count=50, cookies_from_browser="", cookies_file="",
     return _emit_ranked(fallback, note)
 
 
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(
         description="Parallel queue downloader + channel grabber "
@@ -706,13 +656,12 @@ def main(argv=None):
         try:
             signal.signal(sig, _on_signal)
         except (ValueError, OSError):
-            pass  # main thread na ho to signal nahi lag sakta — koi baat nahi
+            pass  # Fails if not called on the main thread.
 
     common = dict(
         cookies_from_browser=args.cookies_from_browser,
         cookies_file=args.cookies_file, proxy=args.proxy)
 
-    # ---- grab mode ----
     if args.grab:
         if args.grab_type == "popular":
             _, ok = run_popular(args.grab, count=args.count, **common)
@@ -721,7 +670,6 @@ def main(argv=None):
                              count=args.count, **common)
         return 0 if ok else 1
 
-    # ---- queue mode ----
     if not args.queue_file:
         emit("QLOG Queue file nahi di — queuedl.py QUEUE_FILE ya --grab URL do.")
         emit("QDONE total=0 done=0 failed=0 skipped=0")

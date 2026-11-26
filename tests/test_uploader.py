@@ -30,8 +30,8 @@ def test_queue_parsing():
     with tempfile.TemporaryDirectory() as tmp:
         q = write_queue(tmp, [
             ["videos/a.mp4", "Title A", "desc", "a|b", "22", "private"],
-            ["videos/a.mp4", "Title A dup", "desc", "a|b", "22", "private"],  # duplicate skip
-            ["videos/b.mp4", "", "desc", "", "", ""],  # title/category/privacy defaults
+            ["videos/a.mp4", "Title A dup", "desc", "a|b", "22", "private"],
+            ["videos/b.mp4", "", "desc", "", "", ""],
         ])
         items = uploader.load_queue(q)
         assert len(items) == 2, f"expected 2, got {len(items)}"
@@ -82,7 +82,6 @@ def test_check_mode_end_to_end():
     with tempfile.TemporaryDirectory() as tmp:
         make_video(tmp, "a.mp4")
         q = write_queue(tmp, [["a.mp4", "Title A", "desc", "x|y", "22", "private"]])
-        # point uploader at temp queue/videos by monkeypatching module constants
         old_base, old_q, old_v = uploader.BASE_DIR, uploader.QUEUE_FILE, uploader.VIDEOS_DIR
         uploader.BASE_DIR, uploader.QUEUE_FILE, uploader.VIDEOS_DIR = tmp, q, tmp
         uploader.UPLOADED_FILE = os.path.join(tmp, "uploaded.csv")

@@ -1,31 +1,5 @@
 #!/usr/bin/env python3
-"""
-Apna Bulk Downloader — V1 (personal use only)
-================================================
-Soban ka apna downloader, SkillNova ka code copy kiye baghair,
-open-source stack pe: yt-dlp + FFmpeg.
-
-Spec (REA kit 2026-11-17 se, REA report ke baad adjust ho sakta hai):
-- urls.txt se queue — aik line pe aik URL, # wali lines comment hain
-- Quality selectable hai: default 2160 (4K), 1440 (2K), 1080, 720
-  (--quality flag se badlo); 3 parallel fragments, 3 retries,
-  5s sleep videos ke beech
-- download_archive.txt — dobara download nahi hota
-- Max 3 concurrent downloads, har video ki live progress terminal pe
-
-Sirf apne / licensed content ke liye — doosron ke videos
-re-upload karne ke liye nahi.
-
-Chalana (Windows, PowerShell):
-    pip install yt-dlp
-    python downloader.py            # urls.txt se sab download (default quality 2160 = 4K)
-    python downloader.py --quality 1440  # 2K pe download
-    python downloader.py --downloads "D:/Mind maze/Videos"  # downloads is folder me jayengi
-    python downloader.py --dry-run  # pehle check karo, download nahi
-
-Chalana (is VM / Linux):
-    python3 downloader.py
-"""
+"""Bulk downloader using yt-dlp + FFmpeg."""
 import argparse
 import concurrent.futures
 import os
@@ -44,12 +18,12 @@ DOWNLOADS_DIR = os.path.join(BASE_DIR, "downloads")
 ARCHIVE_FILE = os.path.join(BASE_DIR, "download_archive.txt")
 
 QUALITY_CHOICES = [720, 1080, 1440, 2160]
-DEFAULT_QUALITY = 2160     # 4K — selectable: 720 / 1080 / 1440 (2K) / 2160 (4K)
-RETRIES = 3                # har video pe 3 retries
+DEFAULT_QUALITY = 2160
+RETRIES = 3
 FRAGMENT_RETRIES = 3
-CONCURRENT_FRAGMENTS = 3   # aik video ke andar parallel fragments
-MAX_WORKERS = 3            # aik sath max 3 videos
-SLEEP_BETWEEN = 5          # videos ke beech 5s (rate-limit se bachao)
+CONCURRENT_FRAGMENTS = 3
+MAX_WORKERS = 3
+SLEEP_BETWEEN = 5
 
 _print_lock = threading.Lock()
 
@@ -109,17 +83,16 @@ def download_one(args):
 
     ydl_opts = {
         "format": fmt,
-        # SkillNova wali folder tartib: downloads/<platform>/<channel>/Title [id].ext
         "outtmpl": os.path.join(downloads_dir, "%(extractor)s", "%(uploader)s",
                                 "%(title)s [%(id)s].%(ext)s"),
         "restrictfilenames": False,
-        "windowsfilenames": True,          # Windows-safe naam
+        "windowsfilenames": True,
         "retries": RETRIES,
         "fragment_retries": FRAGMENT_RETRIES,
         "concurrent_fragments": CONCURRENT_FRAGMENTS,
         "sleep_interval": SLEEP_BETWEEN,
         "download_archive": archive,
-        "continuedl": True,                # aadhi download resume
+        "continuedl": True,
         "noplaylist": True,
         "progress_hooks": [make_progress_hook(tag)],
         "quiet": True,

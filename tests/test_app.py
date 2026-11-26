@@ -324,4 +324,33 @@ assert app.format_views(None) == "—"
 assert app.format_views(True) == "—"
 print("PASS: (u) parse_grab_meta + format_views")
 
+# (v) settings.json download folder persistence + missing-folder fallback
+import tempfile  # noqa: E402
+with tempfile.TemporaryDirectory() as tmp:
+    sp = os.path.join(tmp, "settings.json")
+    default_dl = os.path.join(tmp, "default_dl")
+    custom_dl = os.path.join(tmp, "custom_dl")
+    os.makedirs(custom_dl)
+
+    # missing settings -> default, no warning
+    p, w = app.resolve_download_dir(sp, default_dl)
+    assert p == default_dl and w is None
+
+    # save custom folder -> reload returns custom folder
+    app.save_download_dir(custom_dl, sp)
+    p, w = app.resolve_download_dir(sp, default_dl)
+    assert p == custom_dl and w is None
+
+    # deleted saved folder -> fallback to default + warning
+    os.rmdir(custom_dl)
+    p, w = app.resolve_download_dir(sp, default_dl)
+    assert p == default_dl and w is not None and custom_dl in w
+
+    # reset back to default -> saves default and loads cleanly
+    app.save_download_dir(default_dl, sp)
+    os.makedirs(default_dl)
+    p, w = app.resolve_download_dir(sp, default_dl)
+    assert p == default_dl and w is None
+print("PASS: (v) settings.json persistence + missing-folder fallback + Default reset")
+
 print("ALL LOGIC TESTS PASS")

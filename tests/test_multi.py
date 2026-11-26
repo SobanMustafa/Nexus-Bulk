@@ -61,19 +61,15 @@ def test_registry_load_valid():
         registry, warnings = multi_upload.load_registry(p)
         assert set(registry) == {"mind-maze-fb", "horror-fb", "mind-maze-yt"}, registry
         assert registry["mind-maze-yt"]["platform"] == "youtube"
-        # placeholder page_id = warning, error nahi
         assert any("mind-maze-fb" in w for w in warnings), warnings
     print("PASS: (a) registry load valid (3 destinations, placeholder = warning)")
 
 
 def test_registry_rejects():
     cases = [
-        # duplicate id
         [{"id": "x-yt", "platform": "youtube", "auth_dir": "auth/x"},
          {"id": "x-yt", "platform": "youtube", "auth_dir": "auth/y"}],
-        # bad platform
         [{"id": "x-tt", "platform": "tiktok", "auth_dir": "auth/x"}],
-        # facebook missing page_id
         [{"id": "x-fb", "platform": "facebook", "token_file": "tokens/x.txt"}],
     ]
     for pages in cases:
@@ -103,7 +99,6 @@ def test_queue_grouping_and_unknown_target():
         groups = multi_upload.group_by_target(items)
         assert len(groups["mind-maze-yt"]) == 2, groups
         assert len(groups["mind-maze-fb"]) == 1, groups
-        # unknown target = error
         q2 = write_queue(tmp, [[v1, "A", "", "", "", "", "no-such-page"]])
         try:
             multi_upload.load_queue(q2, registry)
@@ -124,7 +119,7 @@ def test_per_target_uploaded_skip():
         multi_upload.record_uploaded(item_a, "vid1", "https://youtu.be/vid1",
                                      state_dir=state)
         pending = multi_upload.pending_items([item_a, item_b], state_dir=state)
-        assert pending == [item_b], pending  # A skip, B (same file) pending
+        assert pending == [item_b], pending
     print("PASS: (d) per-target uploaded-skip (same file, second target not skipped)")
 
 

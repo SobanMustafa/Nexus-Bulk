@@ -1,6 +1,8 @@
-# Bulk Tool — Downloader + Uploader + Pipeline + Multi-Page
+# Nexus Bulk — Downloader + Uploader + Pipeline + Multi-Page
 
-Soban ka apna, full-fledged bulk tool — aik hi project, aik hi folder.
+**Powered by Soban Mustafa**
+
+Soban ka apna, full-fledged Nexus Bulk tool — aik hi project, aik hi folder.
 SkillNova ka koi code copy nahi: downloader open-source **yt-dlp** pe hai,
 uploader **official YouTube Data API v3** pe, aur Facebook wala hissa
 **Graph API** pe. Sirf personal use — apne / licensed content ke liye.

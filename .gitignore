@@ -8,6 +8,7 @@ uploads.csv
 urls.txt
 paste_links.txt
 gui_queue.txt
+settings.json
 downloads/
 state/
 download_archive.txt

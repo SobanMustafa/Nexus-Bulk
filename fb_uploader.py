@@ -1,42 +1,7 @@
 #!/usr/bin/env python3
-"""
-Facebook Reels Uploader — Graph API (personal use only)
-=========================================================
-Aik Facebook Page pe Reel publish karna, official Graph API se.
-V2 (YouTube) ka Facebook wala counterpart — multi_upload.py isay
-delegate karta hai, lekin ye akela bhi chal sakta hai.
+"""Facebook Reels uploader via Graph API v21.0 (start -> upload -> finish -> poll).
 
-Flow (verified 2026-11-19, Meta docs/guides — LIVE TEST NAHI hua):
-  Graph API v21.0, POST /{page-id}/video_reels, 3 phases:
-  1. start  — upload_phase=start -> video_id + upload_url milta hai
-  2. upload — file ke bytes upload_url (rupload host) pe bhejo:
-              Authorization: OAuth <page-token>, offset: 0,
-              file_size: <bytes>
-  3. finish — upload_phase=finish, video_id,
-              video_state=PUBLISHED, description
-  Phir aik simple status poll: GET /{video_id}?fields=status
-  (max 5 tries, 2s apart) — sirf report ke liye, fail nahi karta.
-
-Page token har page ka alag hota hai: GET /me/accounts se milta hai
-(pages_manage_posts permission). Tumhare APNE pages ke liye
-Standard Access kaafi hai.
-
-Token KABHI print/log nahi hota — na is file mein, na multi_upload mein.
-Token file / pages.json KISI ko mat bhejo, GitHub pe mat daalo.
-
-Sirf stdlib (urllib) — koi extra dependency nahi. Tests ke liye
-http_post / http_get injectable hain taake mock ho sakein.
-
-Chalana:
-    python fb_uploader.py --check --file reel.mp4 --page-id <PAGE_ID> \
-        --token-file tokens/mind-maze-fb.page_token.txt
-        # sirf check: file + token file + page-id, NO network
-    python fb_uploader.py --file reel.mp4 --page-id <PAGE_ID> \
-        --token-file tokens/mind-maze-fb.page_token.txt \
-        --description "Mind Maze — can you reverse it?"
-        # asal upload (3 phases)
-
-Sirf apne / licensed content ke liye.
+Tokens are never logged or printed. http_post/http_get are injectable for tests.
 """
 import argparse
 import json
@@ -49,17 +14,14 @@ import urllib.request
 GRAPH_VERSION = "v21.0"
 GRAPH_BASE = f"https://graph.facebook.com/{GRAPH_VERSION}"
 POLL_TRIES = 5
-POLL_SLEEP = 2  # seconds
+POLL_SLEEP = 2
 
 
 def log(msg):
     print(msg, flush=True)
 
 
-# --- Token ---
-
 def read_token(token_file):
-    """Token file parho — strip karke return. Token kabhi print nahi hota."""
     if not os.path.exists(token_file):
         raise FileNotFoundError(f"token file nahi mili: {token_file}")
     with open(token_file, encoding="utf-8") as f:
@@ -68,8 +30,6 @@ def read_token(token_file):
         raise ValueError(f"token file khaali hai: {token_file}")
     return token
 
-
-# --- Default HTTP (urllib only) — tests mein mock inject hota hai ---
 
 def _parse_response(raw):
     if not raw:
@@ -108,8 +68,6 @@ def _check_graph_error(resp, phase):
         raise RuntimeError(f"Facebook Graph error ({phase}): "
                            f"{err.get('message', err)}")
 
-
-# --- 3 phases ---
 
 def start_upload(page_id, token, http_post=None):
     """Phase 1 — start. Returns (video_id, upload_url)."""
@@ -154,9 +112,9 @@ def finish_upload(page_id, token, video_id, description, http_post=None):
 
 
 def poll_status(video_id, token, http_get=None, sleep=None, tries=POLL_TRIES):
-    """Simple status poll — GET /{video_id}?fields=status.
-    Ready ho to True, warna tries ke baad False (upload fail nahi karta).
-    Note: URL mein token query param hai — URL kabhi log nahi hota."""
+    """Best-effort status poll; returns True if ready/published, False otherwise.
+    Note: URL includes access_token, so it must never be logged.
+    """
     get = http_get or _http_get
     wait = sleep or time.sleep
     url = (f"{GRAPH_BASE}/{video_id}?fields=status"
@@ -197,8 +155,6 @@ def upload_reel(token, page_id, file_path, description,
         log("  [fb] status: abhi processing — Page pe thodi der mein dikhega")
     return video_id
 
-
-# --- CLI ---
 
 def main(argv=None):
     parser = argparse.ArgumentParser(

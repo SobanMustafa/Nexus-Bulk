@@ -8,7 +8,6 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-# flat layout: pipeline.py aur uploader.py dono project root mein hain
 import pipeline  # noqa: E402
 import uploader  # noqa: E402
 
@@ -28,7 +27,7 @@ def test_build_format():
     assert "height<=1440" in pipeline.build_format(1440)
     assert "height<=1080" in pipeline.build_format(1080)
     assert "height<=720" in pipeline.build_format(720)
-    assert pipeline.DEFAULT_QUALITY == 2160  # default 4K
+    assert pipeline.DEFAULT_QUALITY == 2160
     print("PASS: build_format (2160=4K default / 1440=2K / 1080 / 720)")
 
 
@@ -39,7 +38,7 @@ def test_info_to_row_limits():
     assert len(row["title"]) <= 100, row["title"]
     assert len(row["description"]) <= 5000
     assert sum(len(t) for t in row["tags"].split("|")) + row["tags"].count("|") <= 500, row["tags"]
-    assert row["category_id"] == "24", row["category_id"]  # Entertainment -> 24
+    assert row["category_id"] == "24", row["category_id"]
     assert row["privacy"] == "private"
     print("PASS: info_to_row limits (title 100 / desc 5000 / tags 500 / category map)")
 
@@ -143,7 +142,7 @@ def test_check_mode_no_login_no_upload():
         make_video_with_info(dl, "Maze Day 1 [aqz1]",
                              {"title": "Mind Maze Day 1", "description": "d",
                               "tags": ["illusion"], "categories": ["People & Blogs"]})
-        # uploader.py ko temp folder mein copy karo taake subprocess usi ko chalaye
+        # Copy uploader.py into temp dir so subprocess resolves it there.
         import shutil
         shutil.copy(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                                  "uploader.py"),

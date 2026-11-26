@@ -1,21 +1,11 @@
-"""Logic tests for downloader.py — no network, no asal download.
-Run:  python3 tests/test_downloader.py
-
-downloader.py import pe yt-dlp mangta hai (top-level import + sys.exit).
-Test environment me yt-dlp ho ya na ho, yahan sys.modules me aik khaali
-stub daal ke import karte hain — sirf pure logic (build_format, defaults)
-test hoti hai, download wala hissa bilkul nahi chalta. Import ke
-wapas aa jane se hi saabit hai ke __main__ guard ki wajah se import
-pe koi download shuru nahi hua.
-"""
+"""Logic tests for downloader.py — no network, no real download."""
 import os
 import sys
 import types
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# yt-dlp stub — asal library ho to bhi yehi stub use hoga is test me,
-# taake test hamesha offline aur halka rahe.
+# Stub yt_dlp so tests run offline even if yt-dlp is not installed.
 sys.modules["yt_dlp"] = types.ModuleType("yt_dlp")
 
 import downloader  # noqa: E402
@@ -31,17 +21,15 @@ def test_build_format():
 
 
 def test_quality_defaults():
-    assert downloader.DEFAULT_QUALITY == 2160  # default 4K
+    assert downloader.DEFAULT_QUALITY == 2160
     assert downloader.QUALITY_CHOICES == [720, 1080, 1440, 2160]
     print("PASS: quality defaults (default 2160=4K, choices 720/1080/1440/2160)")
 
 
 def test_downloads_flag():
-    # default wahi purana project downloads/ folder — behaviour unchanged
     args = downloader.parse_args([])
     assert args.downloads == downloader.DOWNLOADS_DIR, args.downloads
     assert args.quality == downloader.DEFAULT_QUALITY
-    # override parse hota hai
     args = downloader.parse_args(["--downloads", "/tmp/customdl"])
     assert args.downloads == "/tmp/customdl", args.downloads
     print("PASS: --downloads flag (default = downloads/, override parse hota hai)")

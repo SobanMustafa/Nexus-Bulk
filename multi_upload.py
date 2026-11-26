@@ -1,50 +1,8 @@
 #!/usr/bin/env python3
-"""
-Multi-Page Uploader — Facebook Pages + YouTube Channels, AIK tool
-==================================================================
-Soban ki asal need (2026-11-19): "kuch aisa jo mere multiple pages
-handle kr sakaay" — aur platform us ne khud confirm kiya: DONO,
-Facebook Pages + YouTube channels, aik hi tool mein.
+"""Multi-target uploader for Facebook Pages and YouTube Channels.
 
-Design:
-- pages.json — registry: aik entry = aik destination (page/channel).
-  Har destination ka apna token/auth, apna data. Kuch mix nahi hota.
-  pages.example.json copy karke pages.json banao (placeholders bhardo).
-- uploads.csv — queue, pipeline.py wale format pe + `target` column:
-      file,title,description,tags,category_id,privacy,target
-  target = pages.json wali id (e.g. mind-maze-fb, mind-maze-yt).
-  Aik hi video do targets pe ja sakti hai — har target ka apna
-  uploaded record hai: state/uploaded-<target>.csv
-- YouTube targets: per-channel OAuth — <auth_dir>/client_secrets.json
-  + <auth_dir>/token.json (auth_dir script ke folder se relative).
-  V2 wali hi spec: videos.insert, scope sirf youtube.upload,
-  resumable 10 MB chunks, quota 100 uploads/day, default private.
-- Facebook targets: fb_uploader.upload_reel() ko delegate —
-  Graph API video_reels, 3 phases (start/upload/finish, PUBLISHED).
-  Description = item ki description, khaali ho to title.
-  (FB flow docs se verified hai 2026-11-19 — LIVE TEST nahi hua.)
-
-Chalana (Windows laptop — PowerShell, is folder se):
-    pip install -r requirements.txt
-    python multi_upload.py --check
-        # pehle check: registry + queue + files + limits,
-        # NO network, NO login, NO upload
-    python multi_upload.py --target mind-maze-yt --limit 1
-        # pehla asal test: sirf 1 video, sirf 1 channel
-    python multi_upload.py
-        # poori queue, saare targets
-
-Limits (V2 se): title max 100, description max 5,000,
-tags total max 500 chars, category default 22, privacy default
-private (YouTube). Facebook pe privacy column ignore hoti hai —
-Reel seedha PUBLISHED jati hai (pages.json ki default_privacy).
-
-Tokens/secrets KABHI share mat karo, GitHub pe mat daalo:
-pages.json, tokens/, auth/ — ye sab tumhare pages/channels ki
-chabiyan hain.
-
-Sirf apne / licensed content ke liye — doosron ke videos
-re-upload karne ke liye nahi.
+Uses pages.json as the destination registry and tracks per-target upload state
+in state/uploaded-<target>.csv.
 """
 import argparse
 import csv
@@ -59,12 +17,12 @@ DEFAULT_QUEUE = os.path.join(BASE_DIR, "uploads.csv")
 
 if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
-import fb_uploader  # noqa: E402 — stdlib only, --check mein safe hai
+import fb_uploader  # noqa: E402
 
 SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
-DEFAULT_CATEGORY = "22"       # People & Blogs (V2 wala default)
+DEFAULT_CATEGORY = "22"
 DEFAULT_PRIVACY_YT = "private"
-CHUNK_SIZE = 10 * 1024 * 1024  # 10 MB resumable chunks (V2)
+CHUNK_SIZE = 10 * 1024 * 1024
 MAX_RETRIES = 3
 SLEEP_BETWEEN = 5
 MAX_TITLE = 100
@@ -80,12 +38,8 @@ def log(msg):
     print(msg, flush=True)
 
 
-# --- Registry (pages.json) ---
-
 def load_registry(path):
-    """pages.json parho + validate karo.
-    Returns (registry, warnings) — registry: {id: entry} (order preserved).
-    Kharab registry pe ValueError (saari ghaltiyan aik saath)."""
+    """Load and validate pages.json -> (registry, warnings)."""
     if not os.path.exists(path):
         raise FileNotFoundError(
             f"pages.json nahi mili: {path}\n"
@@ -133,7 +87,7 @@ def load_registry(path):
             if not (entry.get("token_file") or "").strip():
                 errors.append(f"{pid}: facebook entry mein token_file chahiye")
                 continue
-        else:  # youtube
+        else:
             if not (entry.get("auth_dir") or "").strip():
                 errors.append(f"{pid}: youtube entry mein auth_dir chahiye")
                 continue
@@ -144,8 +98,6 @@ def load_registry(path):
         raise ValueError("pages.json mein koi valid entry nahi mili.")
     return registry, warnings
 
-
-# --- Queue (uploads.csv) ---
 
 def parse_tags(raw):
     if not raw:
@@ -161,7 +113,7 @@ def resolve_file(path, base_dir=None):
     cand = os.path.join(base, path)
     if os.path.exists(cand):
         return cand
-    return cand  # error message ke liye best guess
+    return cand
 
 
 def load_queue(path, registry, default_target=None, base_dir=None):
@@ -260,8 +212,6 @@ def validate_item(item, registry, base_dir=None):
     return (not errors, errors)
 
 
-# --- Per-target state ---
-
 def _state_path(target_id, kind, state_dir=None):
     return os.path.join(state_dir or STATE_DIR, f"{kind}-{target_id}.csv")
 
@@ -315,8 +265,6 @@ def record_failed(item, error, state_dir=None):
         w.writerow([item["file"], item["title"], item["target"], str(error)[:500]])
 
 
-# --- YouTube (per channel) ---
-
 def auth_paths(entry, base_dir=None):
     auth_dir = resolve_file(entry["auth_dir"], base_dir)
     return (auth_dir,
@@ -325,7 +273,7 @@ def auth_paths(entry, base_dir=None):
 
 
 def get_youtube_service(entry, base_dir=None):
-    """Us channel ka apna OAuth — google imports sirf asal upload pe."""
+    """Google libs are imported lazily so --check works without them."""
     try:
         from google_auth_oauthlib.flow import InstalledAppFlow
         from google.auth.transport.requests import Request
@@ -399,8 +347,6 @@ def upload_one_youtube(youtube, item, base_dir=None):
     raise last_error
 
 
-# --- Facebook (per page) ---
-
 def upload_one_facebook(entry, item, base_dir=None):
     """fb_uploader ko delegate. Returns facebook video_id.
     Description = item description, khaali ho to title."""
@@ -410,8 +356,6 @@ def upload_one_facebook(entry, item, base_dir=None):
     full = resolve_file(item["file"], base_dir)
     return fb_uploader.upload_reel(token, entry["page_id"], full, description)
 
-
-# --- Main ---
 
 def main(argv=None):
     parser = argparse.ArgumentParser(
@@ -472,7 +416,6 @@ def main(argv=None):
         log(f"  [{tid}] {entry['platform']} — {entry.get('name', '')}: "
             f"{len(gitems)} video(s)")
 
-    # Validation — sab kuch pehle, upload baad mein
     all_ok = True
     for item in pending:
         ok, errors = validate_item(item, registry)
@@ -483,7 +426,6 @@ def main(argv=None):
                 log(f"  - {e}")
 
     if args.check:
-        # Auth files ki maujoodgi sirf warning hai — check network/login nahi karta
         for tid in groups:
             entry = registry[tid]
             if entry["platform"] == "youtube":
@@ -506,7 +448,6 @@ def main(argv=None):
     if not all_ok:
         log("Validation fail — upload shuru nahi hua. Pehle --check chalao.")
         return 1
-    # Asal upload se pehle placeholder Page ID pe ruk jao
     for tid in groups:
         entry = registry[tid]
         if entry["platform"] == "facebook" and PLACEHOLDER_MARK in entry["page_id"]:
@@ -523,7 +464,7 @@ def main(argv=None):
         entry = registry[tid]
         log(f"\n=== [{tid}] {entry['platform']} — {entry.get('name', '')} "
             f"({len(gitems)} video) ===")
-        youtube = None  # lazily, sirf us target ki pehli video pe
+        youtube = None  # Lazily initialized on the first video for this target.
         for idx, item in enumerate(gitems, 1):
             log(f"[{idx}/{len(gitems)}] {item['title']}")
             try:
