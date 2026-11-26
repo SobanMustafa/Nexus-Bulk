@@ -87,6 +87,7 @@ def download_one(args):
                                 "%(title)s [%(id)s].%(ext)s"),
         "restrictfilenames": False,
         "windowsfilenames": True,
+        "trim_file_name": 120,
         "retries": RETRIES,
         "fragment_retries": FRAGMENT_RETRIES,
         "concurrent_fragments": CONCURRENT_FRAGMENTS,

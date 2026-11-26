@@ -145,6 +145,7 @@ def build_download_cmd(url, quality=DEFAULT_QUALITY, downloads_dir=DEFAULT_DOWNL
         "-o", OUTPUT_TEMPLATE,
         "--write-info-json",
         "--windows-filenames",
+        "--trim-filenames", "120",
         "--no-warnings",
     ]
     cmd += _impersonate_args()
@@ -210,6 +211,74 @@ def popular_target(url):
     if any(p in base for p in ("/@", "/channel/", "/c/", "/user/")):
         return base + "/videos"
     return u
+
+
+_FB_SINGLE_RE = re.compile(
+    r"/(?:reel|videos|watch|share|story\.php|permalink\.php)(?:/|\?|$)", re.I)
+
+
+def is_fb_page_url(url):
+    """True when url is a Facebook Page/Profile (not a single video/reel/watch/share link)."""
+    u = str(url or "").strip().lower()
+    if "facebook.com/" not in u and "fb.com/" not in u:
+        return False
+    return _FB_SINGLE_RE.search(u) is None
+
+
+def _fb_fetch_html(url, proxy=""):
+    """Fetch HTML using curl_cffi (Chrome impersonation) or urllib fallback."""
+    try:
+        from curl_cffi import requests as cffi_requests
+        kwargs = {"impersonate": "chrome", "timeout": 20}
+        if proxy:
+            kwargs["proxies"] = {"http": proxy, "https": proxy}
+        resp = cffi_requests.get(url, **kwargs)
+        return resp.text if resp.status_code == 200 else ""
+    except Exception:
+        return ""
+
+
+def _fb_extract_video_urls(html):
+    """Extract unique Facebook watch URLs from page HTML/JSON."""
+    t = (html or "").replace("\\/", "/")
+    ids = []
+    seen = set()
+    for pat in (
+        r"facebook\.com/reel/(\d+)",
+        r"facebook\.com/[^/\"'?]+/videos/(\d+)",
+        r'"video_id":"(\d+)"',
+        r"watch/\?v=(\d+)",
+    ):
+        for vid in re.findall(pat, t):
+            if vid not in seen:
+                seen.add(vid)
+                ids.append(f"https://www.facebook.com/watch/?v={vid}")
+    return ids
+
+
+def _fb_page_video_urls(url, grab_type="popular", count=50, proxy="", fetch_fn=None):
+    """Fetch video/reel URLs from a public Facebook Page/Profile."""
+    fetch_fn = fetch_fn or _fb_fetch_html
+    base = str(url or "").strip().split("?", 1)[0].rstrip("/")
+    if base.endswith("/reels") or base.endswith("/videos"):
+        pages = [base + "/"]
+    elif grab_type == "shorts":
+        pages = [base + "/reels/"]
+    elif grab_type == "videos":
+        pages = [base + "/videos/", base + "/reels/"]
+    else:
+        pages = [base + "/reels/", base + "/videos/", base]
+
+    collected, seen = [], set()
+    for page in pages:
+        html = fetch_fn(page, proxy=proxy)
+        for vurl in _fb_extract_video_urls(html):
+            if vurl not in seen:
+                seen.add(vurl)
+                collected.append(vurl)
+                if len(collected) >= count:
+                    return collected
+    return collected
 
 
 def popular_pool(count):
@@ -428,6 +497,7 @@ def run_one(index, url, quality=DEFAULT_QUALITY, downloads_dir=DEFAULT_DOWNLOADS
         skipped = False
         reported = -1
         attempt_pct = 0
+        errors = []
         try:
             for line in proc.stdout:
                 if "has already been recorded in the archive" in line:
@@ -436,6 +506,9 @@ def run_one(index, url, quality=DEFAULT_QUALITY, downloads_dir=DEFAULT_DOWNLOADS
                     missing = True
                     if on_missing is not None:
                         on_missing()
+                s_line = line.strip()
+                if s_line.startswith("ERROR:"):
+                    errors.append(s_line)
                 pct = parse_progress_line(line)
                 if pct is not None:
                     attempt_pct = max(attempt_pct, int(pct))
@@ -453,6 +526,8 @@ def run_one(index, url, quality=DEFAULT_QUALITY, downloads_dir=DEFAULT_DOWNLOADS
         if rc == 0:
             emit_fn(f"QITEM {index} DONE 100")
             return "DONE", missing
+        for err in errors[-2:]:
+            emit_fn(f"QLOG yt-dlp: {err}")
         if attempt + 1 < MAX_ATTEMPTS:
             emit_fn(f"QLOG Item {index + 1}: pehli koshish fail — "
                     f"dobara try kar raha hoon ({url})")
@@ -493,6 +568,15 @@ def run_grab(url, grab_type="videos", count=50, cookies_from_browser="",
         finally:
             _unregister_proc(proc)
         if rc != 0:
+            if is_fb_page_url(url):
+                fb_urls = _fb_page_video_urls(
+                    url, grab_type="popular" if grab_type == "all" else grab_type,
+                    count=count, proxy=proxy)
+                if fb_urls:
+                    for u in fb_urls:
+                        emit_fn(f"GRAB {u}")
+                    emit_fn(f"GRABDONE {len(fb_urls)}")
+                    return fb_urls, True
             for err in errors[-3:]:
                 emit_fn(f"QLOG yt-dlp: {err}")
             if any("Could not copy" in e and "cookie" in e for e in errors):
@@ -551,6 +635,13 @@ def run_popular(url, count=50, cookies_from_browser="", cookies_file="",
     text, rc, errors = _run_collect(pool_cmd)
     entries = parse_flat_entries(text)
     meta_map = parse_flat_meta(text)
+    if (rc != 0 or not entries) and is_fb_page_url(url):
+        fb_urls = _fb_page_video_urls(
+            url, grab_type="popular", count=popular_pool(count), proxy=proxy)
+        if fb_urls:
+            entries = [{"url": u, "views": None} for u in fb_urls]
+            meta_map = {}
+            rc = 0
     if rc != 0 or not entries:
         for err in errors[-3:]:
             emit_fn(f"QLOG yt-dlp: {err}")
