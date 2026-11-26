@@ -266,8 +266,8 @@ print("PASS: (q) queue_download command shape + cookies/proxy/threads validation
 CH = "https://www.youtube.com/@SomeChannel"
 assert app.build_command("grab_shorts", grab_url=CH) == [
     PY, "queuedl.py", "--grab", CH, "--grab-type", "shorts", "--count", "50"]
-assert app.build_command("grab_videos", grab_url=CH, grab_count="25") == [
-    PY, "queuedl.py", "--grab", CH, "--grab-type", "videos", "--count", "25"]
+assert app.build_command("grab_videos", grab_url=CH, grab_count="20") == [
+    PY, "queuedl.py", "--grab", CH, "--grab-type", "videos", "--count", "20"]
 gcmd = app.build_command("grab_videos", grab_url=CH, cookies=("edge", ""),
                          proxy="socks5://127.0.0.1:1080")
 assert gcmd[gcmd.index("--cookies-from-browser") + 1] == "edge"
@@ -277,8 +277,8 @@ expect_value_error(lambda: app.build_command("grab_shorts", grab_url=""),
 expect_value_error(lambda: app.build_command("grab_shorts", grab_url="  "),
                    "grab whitespace url")
 expect_value_error(
-    lambda: app.build_command("grab_videos", grab_url=CH, grab_count="30"),
-    "grab count 30")
+    lambda: app.build_command("grab_videos", grab_url=CH, grab_count="99"),
+    "grab count 99")
 print("PASS: (r) grab_shorts/grab_videos command shape + validation")
 
 # (s) update_ytdlp + cookies/threads/proxy doosre actions pe IGNORE hote hain
@@ -311,5 +311,17 @@ expect_value_error(lambda: app.build_command("grab_popular", grab_url=""),
 expect_value_error(lambda: app.build_command("grab_popular", grab_url="  "),
                    "grab_popular whitespace url")
 print("PASS: (t) grab_popular command shape + cookies/proxy + validation")
+
+# (u) parse_grab_meta + format_views
+gm = app.parse_grab_meta('GRABMETA {"url": "https://youtu.be/1", "title": "My Video", "views": 43600}')
+assert gm == {"url": "https://youtu.be/1", "title": "My Video", "views": 43600}
+assert app.parse_grab_meta("GRAB https://youtu.be/1") is None
+assert app.parse_grab_meta("GRABMETA {bad json") is None
+assert app.format_views(1_500_000) == "1.5M"
+assert app.format_views(43_600) == "43.6K"
+assert app.format_views(850) == "850"
+assert app.format_views(None) == "—"
+assert app.format_views(True) == "—"
+print("PASS: (u) parse_grab_meta + format_views")
 
 print("ALL LOGIC TESTS PASS")

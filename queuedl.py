@@ -239,8 +239,8 @@ def channel_targets(url, grab_type):
 def popular_target(url):
     """Popular grab ke liye asal target URL.
 
-    Bare YouTube channel URL (@handle ya /channel/…, baghair
-    /videos|/shorts|/streams suffix ke) -> +"/videos" (wahan
+    Bare YouTube channel URL (@handle, /channel/…, /c/…, /user/…,
+    baghair /videos|/shorts|/streams suffix ke) -> +"/videos" (wahan
     saari videos ki list milti hai). Baaki sab — TikTok @account,
     Facebook page, playlist, pehle se suffixed channel — jaisa
     hai waisa hi.
@@ -251,7 +251,7 @@ def popular_target(url):
     base = u.rstrip("/")
     if base.endswith(("/videos", "/shorts", "/streams")):
         return base
-    if "/@" in base or "/channel/" in base:
+    if any(p in base for p in ("/@", "/channel/", "/c/", "/user/")):
         return base + "/videos"
     return u
 
@@ -386,6 +386,66 @@ def parse_info_counts(text):
     return counts
 
 
+def parse_flat_meta(json_text):
+    """--dump-single-json ka text -> {url: {"title": str, "views": int|float|None}}."""
+    try:
+        data = json.loads(json_text or "")
+    except (ValueError, TypeError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    entries = data.get("entries")
+    if not isinstance(entries, list):
+        return {}
+    meta = {}
+    for e in entries:
+        if not isinstance(e, dict):
+            continue
+        url = str(e.get("webpage_url") or e.get("url") or "").strip()
+        if not (url.startswith("http://") or url.startswith("https://")):
+            continue
+        title = str(e.get("title") or "").strip()
+        views = _views_or_none(e.get("view_count"))
+        prev = meta.get(url)
+        if prev is None:
+            meta[url] = {"title": title, "views": views}
+        else:
+            if not prev["title"] and title:
+                prev["title"] = title
+            if views is not None and (prev["views"] is None or views > prev["views"]):
+                prev["views"] = views
+    return meta
+
+
+def parse_info_meta(text):
+    """--dump-json (multi-URL) ka stdout -> {url: {"title": str, "views": int|float|None}}."""
+    meta = {}
+    for raw in str(text or "").splitlines():
+        line = raw.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            data = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(data, dict):
+            continue
+        url = str(data.get("webpage_url") or data.get("url") or "").strip()
+        if not url.startswith("http"):
+            continue
+        title = str(data.get("title") or "").strip()
+        views = _views_or_none(data.get("view_count"))
+        prev = meta.get(url)
+        if prev is None:
+            meta[url] = {"title": title, "views": views}
+        else:
+            if not prev["title"] and title:
+                prev["title"] = title
+            if views is not None and (prev["views"] is None or views > prev["views"]):
+                prev["views"] = views
+    return meta
+
+
 # ---------------------------------------------------------------------------
 # Runners (popen_factory injectable hai — tests fake laga sakte hain)
 # ---------------------------------------------------------------------------
@@ -484,6 +544,8 @@ def run_grab(url, grab_type="videos", count=50, cookies_from_browser="",
                 emit_fn(f"QLOG yt-dlp: {err}")
             if any("Could not copy" in e and "cookie" in e for e in errors):
                 emit_fn("QLOG Tip: Browser (Chrome/Edge) khula hua hai — browser band karo ya Cookies dropdown ko 'None' pe rakho.")
+            if "facebook.com" in target.lower() and any("Unsupported URL" in e for e in errors):
+                emit_fn("QLOG Facebook Page/Profile ki video list yt-dlp support nahi karta (sirf direct Facebook video/reel links download hoti hain — Section 1 me paste karo).")
             emit_fn(f"QLOG Grab fail ho gaya: {target} "
                     f"(yt-dlp exit {rc}) — link check karo, ya cookies try karo.")
             emit_fn("GRABDONE 0")
@@ -535,11 +597,14 @@ def run_popular(url, count=50, cookies_from_browser="", cookies_file="",
         cookies_file=cookies_file, proxy=proxy)
     text, rc, errors = _run_collect(pool_cmd)
     entries = parse_flat_entries(text)
+    meta_map = parse_flat_meta(text)
     if rc != 0 or not entries:
         for err in errors[-3:]:
             emit_fn(f"QLOG yt-dlp: {err}")
         if any("Could not copy" in e and "cookie" in e for e in errors):
             emit_fn("QLOG Tip: Browser (Chrome/Edge) khula hua hai — browser band karo ya Cookies dropdown ko 'None' pe rakho.")
+        if "facebook.com" in target.lower() and any("Unsupported URL" in e for e in errors):
+            emit_fn("QLOG Facebook Page/Profile ki video list yt-dlp support nahi karta (sirf direct Facebook video/reel links download hoti hain — Section 1 me paste karo).")
         emit_fn(f"QLOG Popular grab fail ho gaya: {target} "
                 f"(yt-dlp exit {rc}) — link check karo, ya cookies try karo.")
         emit_fn("GRABDONE 0")
@@ -547,6 +612,11 @@ def run_popular(url, count=50, cookies_from_browser="", cookies_file="",
 
     def _emit_ranked(ranked, note):
         for u in ranked:
+            m = meta_map.get(u)
+            if m and (m.get("title") or m.get("views") is not None):
+                emit_fn("GRABMETA " + json.dumps(
+                    {"url": u, "title": m.get("title", ""),
+                     "views": m.get("views")}, ensure_ascii=False))
             emit_fn(f"GRAB {u}")
         emit_fn(note)
         emit_fn(f"GRABDONE {len(ranked)}")
@@ -572,6 +642,12 @@ def run_popular(url, count=50, cookies_from_browser="", cookies_file="",
         cookies_file=cookies_file, proxy=proxy)
     info_text, _info_rc, _info_errors = _run_collect(info_cmd)
     counts = parse_info_counts(info_text)
+    for u, im in parse_info_meta(info_text).items():
+        cur = meta_map.setdefault(u, {"title": "", "views": None})
+        if not cur["title"] and im.get("title"):
+            cur["title"] = im["title"]
+        if im.get("views") is not None and (cur["views"] is None or im["views"] > cur["views"]):
+            cur["views"] = im["views"]
     if counts:
         ranked = rank_popular(
             [{"url": u, "views": v} for u, v in counts.items()], count)
@@ -582,10 +658,12 @@ def run_popular(url, count=50, cookies_from_browser="", cookies_file="",
 
     # ---- fallback: views ka data hi nahi — asal order ----
     fallback = first_urls[:count]
-    return _emit_ranked(
-        fallback,
-        f"QLOG Views ka data nahi mila — pehli {len(fallback)} "
-        f"videos asal order me queue me")
+    if "facebook.com" in url.lower():
+        note = "QLOG FB pe views nahi mile, latest videos liye hain"
+    else:
+        note = (f"QLOG Views ka data nahi mila — pehli {len(fallback)} "
+                f"videos asal order me queue me")
+    return _emit_ranked(fallback, note)
 
 
 # ---------------------------------------------------------------------------

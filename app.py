@@ -84,6 +84,7 @@ usi folder se videos uthata hai (uploads.csv wahi se banti hai).
 Multi Upload ko ye pass NAHI hota — wahan queue ki rows hi sab
 kuch hain.
 """
+import json
 import os
 import re
 import sys
@@ -93,7 +94,7 @@ PRIVACY_CHOICES = ("private", "unlisted", "public")
 QUALITY_CHOICES = ("720", "1080", "1440", "2160")  # 1440 = 2K, 2160 = 4K
 TARGET_PRESETS = ("mind-maze-yt", "mind-maze-fb", "horror-fb")
 THREADS_CHOICES = ("1", "2", "3", "4", "6", "8", "12", "16")
-GRAB_COUNT_CHOICES = ("10", "25", "50", "100")
+GRAB_COUNT_CHOICES = ("10", "20", "30", "50")
 COOKIE_MODES = ("none", "chrome", "edge", "firefox", "file")
 # Queue row ki status values (tree + stats inhi pe chalte hain)
 Q_PENDING = "Pending"
@@ -422,6 +423,44 @@ def parse_grab_line(line):
     return None
 
 
+def parse_grab_meta(line):
+    """queuedl ki 'GRABMETA <json>' line -> {"url", "title", "views"}, warna None."""
+    if not line:
+        return None
+    s = str(line).strip()
+    if not s.startswith("GRABMETA "):
+        return None
+    try:
+        data = json.loads(s[len("GRABMETA "):])
+    except ValueError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    url = str(data.get("url") or "").strip()
+    if not (url.startswith("http://") or url.startswith("https://")):
+        return None
+    views = data.get("views")
+    if isinstance(views, bool) or not isinstance(views, (int, float)):
+        views = None
+    return {
+        "url": url,
+        "title": str(data.get("title") or "").strip(),
+        "views": views,
+    }
+
+
+def format_views(views):
+    """View count ko short insaani shakal me badlo (e.g. 1.2M, 43.6K, 850, —)."""
+    if isinstance(views, bool) or not isinstance(views, (int, float)):
+        return "—"
+    v = int(views)
+    if v >= 1_000_000:
+        return f"{v / 1_000_000:.1f}M"
+    if v >= 1_000:
+        return f"{v / 1_000:.1f}K"
+    return str(v)
+
+
 def parse_qdone(line):
     """'QDONE total=N done=N failed=N skipped=N' -> dict, warna None."""
     if not line:
@@ -708,7 +747,7 @@ def _build_gui(tk, scrolledtext):
     limit_var = tk.StringVar()
     threads_var = tk.StringVar(value="4")
     channel_var = tk.StringVar()
-    grab_count_var = tk.StringVar(value="50")
+    grab_count_var = tk.StringVar(value="10")
     cookies_var = tk.StringVar(value="None")
     cookies_file = {"path": ""}  # cookies.txt mode mein chuni hui file
     cookies_file_var = tk.StringVar(value="")
@@ -793,33 +832,31 @@ def _build_gui(tk, scrolledtext):
         side="left", fill="x", expand=True, padx=(6, 0))
     grow2 = tk.Frame(card1, bg=PANEL)
     grow2.pack(fill="x", pady=(0, 10))
-    b_grab_s = secondary_btn(grow2, "Shorts Grab",
-                             lambda: on_grab("shorts"))
-    b_grab_s.pack(side="left", padx=(0, 6))
-    b_grab_v = secondary_btn(grow2, "Videos Grab",
-                             lambda: on_grab("videos"))
-    b_grab_v.pack(side="left", padx=(0, 6))
-    b_grab_p = secondary_btn(grow2, "Popular Grab",
-                             lambda: on_grab("popular"))
-    b_grab_p.pack(side="left", padx=(0, 18))
+    b_grab_p = primary_btn(grow2, "Top Videos Grab Karo", BLUE, BLUE_ACTIVE,
+                           lambda: on_grab("popular"))
+    b_grab_p.pack(side="left", padx=(0, 10))
     field_label(grow2, "Count:").pack(side="left")
     dark_option_menu(grow2, grab_count_var, GRAB_COUNT_CHOICES,
-                     width=5).pack(side="left", padx=(6, 0))
-    hint_label(grow2, "channel ke links seedha queue me aa jayenge — "
-                      "Popular = sab se zyada views wali"
-               ).pack(side="left", padx=(8, 0))
+                     width=5).pack(side="left", padx=(6, 12))
+    b_grab_v = small_btn(grow2, "Videos", lambda: on_grab("videos"))
+    b_grab_v.pack(side="left", padx=(0, 6))
+    b_grab_s = small_btn(grow2, "Shorts", lambda: on_grab("shorts"))
+    b_grab_s.pack(side="left", padx=(0, 8))
+    hint_label(grow2, "Top = highest views pehle").pack(side="left")
     # 3) QUEUE list — har link aik row: status live update hota hai
     section_heading(card1, "3. QUEUE")
     tree_frame = tk.Frame(card1, bg=PANEL)
     tree_frame.pack(fill="x", pady=(0, 6))
-    tree = ttk.Treeview(tree_frame, columns=("num", "link", "status"),
+    tree = ttk.Treeview(tree_frame, columns=("num", "video", "views", "status"),
                         show="headings", height=6, style="Dark.Treeview",
                         selectmode="extended")
     tree.heading("num", text="#")
-    tree.heading("link", text="Link")
+    tree.heading("video", text="Video / Link")
+    tree.heading("views", text="Views")
     tree.heading("status", text="Status")
-    tree.column("num", width=40, minwidth=32, stretch=False, anchor="center")
-    tree.column("link", width=520, minwidth=200, stretch=True)
+    tree.column("num", width=38, minwidth=32, stretch=False, anchor="center")
+    tree.column("video", width=430, minwidth=180, stretch=True)
+    tree.column("views", width=85, minwidth=65, stretch=False, anchor="e")
     tree.column("status", width=170, minwidth=130, stretch=False)
     tree_scroll = tk.Scrollbar(tree_frame, orient="vertical",
                                command=tree.yview,
@@ -863,8 +900,9 @@ def _build_gui(tk, scrolledtext):
     tk.Label(card1, textvariable=stats_var, font=FONT_STATS,
              bg=PANEL, fg=BLUE_BRIGHT).pack(anchor="w", pady=(0, 8))
     # ---------- queue state + helpers (DOWNLOAD card) ----------
-    queue_rows = []          # [{"url", "status", "pct", "iid"}]
+    queue_rows = []          # [{"url", "title", "views", "status", "pct", "iid"}]
     queue_ids = {"next": 0}  # tree item ids ka counter
+    pending_meta = {}        # url -> {"title", "views"} from GRABMETA
 
     def row_status_text(row):
         st = row["status"]
@@ -885,24 +923,38 @@ def _build_gui(tk, scrolledtext):
             f"Remaining: {s['remaining']} | "
             f"Downloading: {s['downloading']} | Failed: {s['failed']}")
 
+    def row_display_values(num, row):
+        label = row.get("title") or row["url"]
+        return (num, label, format_views(row.get("views")),
+                row_status_text(row))
+
     def refresh_queue_view():
         for iid in tree.get_children():
             tree.delete(iid)
         for n, row in enumerate(queue_rows, 1):
             tree.insert("", "end", iid=row["iid"],
-                        values=(n, row["url"], row_status_text(row)))
+                        values=row_display_values(n, row))
         update_stats()
 
-    def add_links_to_queue(links, announce=True):
+    def add_links_to_queue(links, announce=True, meta_map=None):
         """Links queue mein add karo (dedupe ke sath). Naye add hue gin ke do."""
         new = dedupe_new([r["url"] for r in queue_rows], links)
+        meta_map = meta_map or {}
         for url in new:
             queue_ids["next"] += 1
             iid = f"q{queue_ids['next']}"
-            row = {"url": url, "status": Q_PENDING, "pct": 0, "iid": iid}
+            m = meta_map.get(url) or {}
+            row = {
+                "url": url,
+                "title": m.get("title", ""),
+                "views": m.get("views"),
+                "status": Q_PENDING,
+                "pct": 0,
+                "iid": iid,
+            }
             queue_rows.append(row)
             tree.insert("", "end", iid=iid,
-                        values=(len(queue_rows), url, row_status_text(row)))
+                        values=row_display_values(len(queue_rows), row))
         if new:
             update_stats()
         if announce:
@@ -1283,9 +1335,15 @@ def _build_gui(tk, scrolledtext):
             n = s[len("GRABDONE "):].strip()
             write_log(f"Channel se {n} link(s) queue me aa gaye\n")
             return
+        meta = parse_grab_meta(s)
+        if meta is not None:
+            pending_meta[meta["url"]] = meta
+            return
         grabbed = parse_grab_line(s)
         if grabbed is not None:
-            add_links_to_queue([grabbed], announce=False)
+            m = pending_meta.pop(grabbed, None)
+            add_links_to_queue([grabbed], announce=False,
+                               meta_map={grabbed: m} if m else None)
             return
         qd = parse_qdone(s)
         if qd is not None:

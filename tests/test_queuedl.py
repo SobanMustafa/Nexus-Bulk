@@ -395,4 +395,31 @@ assert not any(e.startswith("GRAB ") for e in events)
 assert len(calls) == 1
 print("PASS: (t) run_popular step-1 failure -> GRABDONE 0")
 
+# (u) parse_flat_meta + GRABMETA emission + FB fallback message
+meta_json = json.dumps({"entries": [
+    {"webpage_url": "https://www.youtube.com/watch?v=v1",
+     "title": "Top Hit", "view_count": 90000},
+]})
+assert queuedl.parse_flat_meta(meta_json) == {
+    "https://www.youtube.com/watch?v=v1": {"title": "Top Hit", "views": 90000}
+}
+events = []
+factory, _ = make_factory([([meta_json + "\n"], 0)])
+queuedl.run_popular("https://www.youtube.com/c/SomeChan", count=10,
+                    emit_fn=events.append, popen_factory=factory)
+assert any(e.startswith("GRABMETA ") and "Top Hit" in e for e in events)
+
+fb_pool = json.dumps({"entries": [
+    {"webpage_url": "https://www.facebook.com/reel/111", "title": "FB 1"},
+    {"webpage_url": "https://www.facebook.com/reel/222", "title": "FB 2"},
+]})
+events = []
+factory, _ = make_factory([([fb_pool + "\n"], 0), (["\n"], 0)])
+urls, ok = queuedl.run_popular(
+    "https://www.facebook.com/SomePage", count=2,
+    emit_fn=events.append, popen_factory=factory)
+assert ok is True and len(urls) == 2
+assert "QLOG FB pe views nahi mile, latest videos liye hain" in events
+print("PASS: (u) GRABMETA + parse_flat_meta + FB views-unavailable fallback")
+
 print("ALL LOGIC TESTS PASS")
