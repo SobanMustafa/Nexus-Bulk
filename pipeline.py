@@ -178,7 +178,7 @@ def build_uploads_csv(downloads_dir, privacy, uploader_dir):
         if video in done or os.path.abspath(video) in done or os.path.basename(video) in done:
             continue
         rows.append(info_to_row(info, video, privacy))
-    # Report videos missing .info.json instead of silently skipping them.
+    # Report videos missing .info.json (check for clean .txt Title+Caption first).
     known = {os.path.splitext(os.path.basename(n)[: -len(".info.json")])[0]
              for n in infos}
     for root, _dirs, files in os.walk(downloads_dir):
@@ -188,6 +188,23 @@ def build_uploads_csv(downloads_dir, privacy, uploader_dir):
                 if stem not in known and not any(
                     r["file"].endswith(name) for r in rows
                 ):
+                    txt_path = os.path.join(root, stem + ".txt")
+                    if os.path.isfile(txt_path):
+                        video = os.path.join(root, name)
+                        if video in done or os.path.abspath(video) in done or name in done:
+                            continue
+                        try:
+                            with open(txt_path, encoding="utf-8") as tf:
+                                raw_txt = tf.read()
+                            title, caption = "", ""
+                            if "\nCaption:\n" in raw_txt:
+                                t_part, c_part = raw_txt.split("\nCaption:\n", 1)
+                                title = t_part.replace("Title:\n", "", 1).strip()
+                                caption = c_part.strip()
+                            rows.append(info_to_row({"title": title, "description": caption}, video, privacy))
+                            continue
+                        except OSError:
+                            pass
                     problems.append(
                         f"{name}: .info.json nahi mili — dobara download karo "
                         f"ya --upload-only se pehle metadata banao"

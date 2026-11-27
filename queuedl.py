@@ -477,6 +477,29 @@ def parse_info_meta(text):
     return meta
 
 
+def _slim_info_to_txt(info_path):
+    """Replace bloated .info.json with a clean .txt containing only Title and Caption."""
+    if not info_path or not os.path.isfile(info_path):
+        return
+    try:
+        with open(info_path, encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return
+    if not isinstance(data, dict):
+        return
+    title = str(data.get("fulltitle") or data.get("title") or "").strip()
+    caption = str(data.get("description") or "").strip()
+    base = info_path[: -len(".info.json")] if info_path.endswith(".info.json") else info_path
+    txt_path = base + ".txt"
+    try:
+        with open(txt_path, "w", encoding="utf-8") as f:
+            f.write(f"Title:\n{title}\n\nCaption:\n{caption}\n")
+        os.remove(info_path)
+    except OSError:
+        pass
+
+
 def run_one(index, url, quality=DEFAULT_QUALITY, downloads_dir=DEFAULT_DOWNLOADS,
             archive=DEFAULT_ARCHIVE, cookies_from_browser="", cookies_file="",
             proxy="", emit_fn=None, popen_factory=None, on_missing=None):
@@ -504,6 +527,7 @@ def run_one(index, url, quality=DEFAULT_QUALITY, downloads_dir=DEFAULT_DOWNLOADS
         reported = -1
         attempt_pct = 0
         errors = []
+        info_paths = []
         try:
             for line in proc.stdout:
                 if "has already been recorded in the archive" in line:
@@ -513,6 +537,10 @@ def run_one(index, url, quality=DEFAULT_QUALITY, downloads_dir=DEFAULT_DOWNLOADS
                     if on_missing is not None:
                         on_missing()
                 s_line = line.strip()
+                if "Writing video metadata as JSON to:" in s_line:
+                    p = s_line.split("Writing video metadata as JSON to:", 1)[1].strip()
+                    if p:
+                        info_paths.append(p)
                 if s_line.startswith("ERROR:"):
                     errors.append(s_line)
                 pct = parse_progress_line(line)
@@ -530,6 +558,8 @@ def run_one(index, url, quality=DEFAULT_QUALITY, downloads_dir=DEFAULT_DOWNLOADS
             emit_fn(f"QITEM {index} SKIPPED 100")
             return "SKIPPED", missing
         if rc == 0:
+            for ip in info_paths:
+                _slim_info_to_txt(ip)
             emit_fn(f"QITEM {index} DONE 100")
             return "DONE", missing
         for err in errors[-2:]:
