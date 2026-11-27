@@ -733,7 +733,7 @@ def _build_gui(tk, scrolledtext):
     head_mid = tk.Frame(header, bg=PANEL)
     head_mid.grid(row=0, column=1, padx=12)
     tk.Label(
-        head_mid, text="For contact: ",
+        head_mid, text="If you want to add new features. Contact: ",
         font=FONT_SMALL, bg=PANEL, fg=LABEL,
     ).pack(side="left")
 
